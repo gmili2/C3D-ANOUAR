@@ -13,7 +13,7 @@
           />
           📁 Uploader un modèle 3D (.obj)
         </label>
-        <button @click="applyDesignToModel" class="apply-btn" :disabled="!hasModel || !hasDesign">
+        <!-- <button @click="applyDesignToModel" class="apply-btn" :disabled="!hasModel || !hasDesign">
           ✨ Appliquer le design sur le modèle
         </button>
         <button @click="showMeshSelector = !showMeshSelector" class="mesh-selector-btn" :disabled="!hasModel">
@@ -22,7 +22,7 @@
         <label class="toggle-realtime">
           <input type="checkbox" v-model="realTimeUpdateEnabled" />
           <span>Temps réel</span>
-        </label>
+        </label> -->
       </div>
     </div>
 
@@ -35,10 +35,19 @@
           :texture="appliedTexture"
           :canvas2D="fabricCanvasElement"
           :enable-direct-edit="true"
+          :work-zone-top="workZoneTop / 100"
+          :work-zone-bottom="workZoneBottom / 100"
+          :placement-mode="placementMode"
+          :placement-type="placementType"
+          :drag-mode="dragMode"
           @model-loaded="onModelLoaded"
           @model-error="onModelError"
           @texture-ready="onTextureReady"
-          @3d-click="on3DClick"
+          @3d-click="on3DClickForPlacement"
+          @3d-drag="on3DDrag"
+          @3d-drag-start="on3DDragStart"
+          @3d-drag-end="on3DDragEnd"
+          @3d-scale="on3DScale"
         />
       </div>
 
@@ -48,12 +57,55 @@
           <h3>Canvas de Design 2D</h3>
           <button @click="toggleDesigner" class="toggle-btn">✕</button>
         </div>
+        
+        <!-- Contrôles de zone de travail -->
+        <div class="work-zone-controls" v-if="hasModel">
+          <div class="control-group">
+            <label>Zone de travail verticale</label>
+            <div class="slider-group">
+              <label class="slider-label">
+                Exclure haut:
+                <input 
+                  type="range" 
+                  v-model.number="workZoneTop" 
+                  min="0" 
+                  max="50" 
+                  step="1"
+                  @input="onWorkZoneChanged"
+                />
+                {{ workZoneTop }}%
+              </label>
+              <label class="slider-label">
+                Exclure bas:
+                <input 
+                  type="range" 
+                  v-model.number="workZoneBottom" 
+                  min="0" 
+                  max="50" 
+                  step="1"
+                  @input="onWorkZoneChanged"
+                />
+                {{ workZoneBottom }}%
+              </label>
+            </div>
+            <div class="zone-info">
+              Zone active: {{ 100 - workZoneTop - workZoneBottom }}% ({{ workZoneTop }}% haut exclu, {{ workZoneBottom }}% bas exclu)
+            </div>
+          </div>
+        </div>
+        
         <FabricDesigner
           ref="fabricDesignerRef"
-          :canvas-width="800"
-          :canvas-height="600"
+          :canvas-width="1200"
+          :canvas-height="900"
+          :work-zone-top="workZoneTop / 100"
+          :work-zone-bottom="workZoneBottom / 100"
           @design-updated="onDesignUpdated"
           @canvas-ready="onFabricCanvasReady"
+          @placement-mode-changed="onPlacementModeChanged"
+          @object-selected="onObjectSelected"
+          @object-deselected="onObjectDeselected"
+          @move-object="onMoveObject"
         />
       </div>
 
@@ -76,6 +128,16 @@
 
     <div v-if="errorMessage" class="error-message">
       ⚠️ {{ errorMessage }}
+    </div>
+    
+    <!-- Indicateur de mode placement -->
+    <div v-if="placementMode && placementType" class="placement-indicator">
+      🎯 Mode placement actif: {{ placementType === 'circle' ? 'Cercle' : placementType === 'rectangle' ? 'Rectangle' : placementType === 'text' ? 'Texte' : 'Image' }} - Cliquez sur le modèle 3D pour placer
+    </div>
+    
+    <!-- Indicateur de mode drag -->
+    <div v-if="dragMode" class="drag-indicator">
+      🖱️ Mode drag actif - Sélectionnez un élément sur le canvas 2D puis glissez-le sur le modèle 3D
     </div>
   </div>
 </template>
@@ -100,6 +162,12 @@ const fabricCanvasElement = ref(null) // Référence au canvas HTML Fabric.js
 const showMeshSelector = ref(false)
 const modelMeshes = ref([])
 const selectedMesh = ref(null)
+const workZoneTop = ref(10) // Pourcentage à exclure du haut (défaut 10%)
+const workZoneBottom = ref(10) // Pourcentage à exclure du bas (défaut 10%)
+const placementMode = ref(false) // Mode de placement actif
+const placementType = ref(null) // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
+const dragMode = ref(false) // Mode drag actif pour déplacer un objet
+const isDragging = ref(false) // Indique si on est en train de glisser
 
 const hasModel = computed(() => uploadedModel.value !== null)
 let highlightedMeshIndex = ref(-1)
@@ -245,20 +313,27 @@ const onTextureReady = (texture) => {
   appliedTexture.value = texture
 }
 
-const on3DClick = (clickData) => {
-  console.log('Clic sur modèle 3D détecté:', clickData)
-  
-  // Afficher quelle pièce a été cliquée
-  if (clickData.mesh) {
-    const meshInfo = modelMeshes.value.find(m => m.mesh === clickData.mesh)
-    if (meshInfo) {
-      console.log(`📍 Clic sur: ${meshInfo.name}`)
-    }
+const on3DClickForPlacement = (clickData) => {
+  // Si on n'est pas en mode placement, ignorer
+  if (!placementMode.value || !placementType.value) {
+    return
   }
   
-  // Projeter le clic sur le canvas 2D
-  if (fabricDesignerRef.value && clickData.canvasX !== undefined && clickData.canvasY !== undefined) {
-    fabricDesignerRef.value.handle3DClick(clickData.canvasX, clickData.canvasY)
+  // Vérifier que le clic est dans la zone active (pas null)
+  if (clickData.canvasX === undefined || clickData.canvasY === undefined || clickData.canvasX === null || clickData.canvasY === null) {
+    console.warn('⚠️ Clic hors zone de travail, élément non placé')
+    return
+  }
+  
+  console.log('🎯 Placement direct sur modèle 3D:', {
+    type: placementType.value,
+    position: clickData.canvasX + ', ' + clickData.canvasY
+  })
+  
+  // Placer l'élément sur le canvas 2D à la position du clic
+  if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
+    fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
+    // Le mode placement sera désactivé automatiquement par placeElementAt
   }
 }
 
@@ -266,6 +341,93 @@ const onModelError = (error) => {
   console.error('Erreur lors du chargement du modèle:', error)
   errorMessage.value = `Erreur lors du chargement: ${error.message}`
   uploadedModel.value = null
+  workZoneTop.value = 10
+  workZoneBottom.value = 10
+}
+
+const onWorkZoneChanged = () => {
+  // Notifier ThreeScene et FabricDesigner du changement
+  if (threeSceneRef.value && threeSceneRef.value.updateWorkZone) {
+    threeSceneRef.value.updateWorkZone(workZoneTop.value / 100, workZoneBottom.value / 100)
+  }
+  console.log('Zone de travail mise à jour:', {
+    top: workZoneTop.value + '%',
+    bottom: workZoneBottom.value + '%',
+    active: (100 - workZoneTop.value - workZoneBottom.value) + '%'
+  })
+}
+
+const onPlacementModeChanged = (modeData) => {
+  placementMode.value = modeData.active
+  placementType.value = modeData.type
+  console.log('Mode placement changé:', modeData)
+  
+  // Mettre à jour le curseur du modèle 3D si nécessaire
+  if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
+    threeSceneRef.value.setPlacementMode(modeData.active, modeData.type)
+  }
+}
+
+const onObjectSelected = (data) => {
+  console.log('Objet sélectionné dans Fabric:', data)
+  dragMode.value = true
+  
+  // Activer le mode drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+    threeSceneRef.value.setDragMode(true)
+  }
+}
+
+const onObjectDeselected = () => {
+  console.log('Objet désélectionné dans Fabric')
+  dragMode.value = false
+  isDragging.value = false
+  
+  // Désactiver le mode drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+    threeSceneRef.value.setDragMode(false)
+  }
+}
+
+const onMoveObject = (data) => {
+  // Cette fonction peut être utilisée pour des actions supplémentaires
+  console.log('Objet déplacé:', data)
+}
+
+const on3DDragStart = (clickData) => {
+  if (!dragMode.value) return
+  isDragging.value = true
+  console.log('🎯 Début du drag sur 3D:', clickData)
+}
+
+const on3DDrag = (clickData) => {
+  if (!dragMode.value || !isDragging.value) return
+  
+  // Vérifier que le clic est dans la zone active
+  if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
+      clickData.canvasX === null || clickData.canvasY === null) {
+    return
+  }
+  
+  // Déplacer l'objet sélectionné
+  if (fabricDesignerRef.value && fabricDesignerRef.value.moveSelectedObject) {
+    fabricDesignerRef.value.moveSelectedObject(clickData.canvasX, clickData.canvasY)
+  }
+}
+
+const on3DDragEnd = () => {
+  isDragging.value = false
+  console.log('🎯 Fin du drag sur 3D')
+}
+
+const on3DScale = (scaleData) => {
+  if (!dragMode.value) return
+  
+  // Redimensionner l'objet sélectionné
+  if (fabricDesignerRef.value && fabricDesignerRef.value.scaleSelectedObject) {
+    fabricDesignerRef.value.scaleSelectedObject(scaleData.scaleFactor)
+    console.log('📏 Redimensionnement:', scaleData.scaleFactor)
+  }
 }
 
 const onDesignUpdated = () => {
@@ -510,7 +672,7 @@ const applyDesignToModel = async () => {
 }
 
 .designer-panel {
-  width: 450px;
+  flex: 1;
   background: white;
   border-left: 2px solid #e5e7eb;
   display: flex;
@@ -584,6 +746,113 @@ const applyDesignToModel = async () => {
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   z-index: 1000;
   animation: slideUp 0.3s ease;
+}
+
+.work-zone-controls {
+  padding: 15px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.control-group label {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  color: #374151;
+  margin-bottom: 10px;
+}
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.slider-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.slider-label input[type="range"] {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  outline: none;
+}
+
+.slider-label input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #4f46e5;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.slider-label input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #4f46e5;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.zone-info {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.placement-indicator {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: #4f46e5;
+  color: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  font-size: 14px;
+  font-weight: 500;
+  animation: slideDown 0.3s ease;
+}
+
+.drag-indicator {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: #10b981;
+  color: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  font-size: 14px;
+  font-weight: 500;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 @keyframes slideUp {

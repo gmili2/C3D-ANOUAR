@@ -38,10 +38,30 @@ const props = defineProps({
   enableDirectEdit: {
     type: Boolean,
     default: true
+  },
+  workZoneTop: {
+    type: Number,
+    default: 0.1 // 10% par défaut
+  },
+  workZoneBottom: {
+    type: Number,
+    default: 0.1 // 10% par défaut
+  },
+  placementMode: {
+    type: Boolean,
+    default: false
+  },
+  placementType: {
+    type: String,
+    default: null // 'circle', 'rectangle', 'text', 'image'
+  },
+  dragMode: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['model-loaded', 'model-error', 'texture-ready', '3d-click', 'meshes-extracted'])
+const emit = defineEmits(['model-loaded', 'model-error', 'texture-ready', '3d-click', 'meshes-extracted', '3d-drag', '3d-drag-start', '3d-drag-end', '3d-scale'])
 
 let allMeshes = []
 let activeMesh = null
@@ -177,6 +197,8 @@ const initScene = () => {
 }
 
 let raycaster3D = null
+let isDragging3D = false
+let lastDragPosition = null
 
 const setupClickHandler = () => {
   if (!renderer || !canvasElement.value || raycaster3D) return
@@ -184,7 +206,97 @@ const setupClickHandler = () => {
   raycaster3D = new THREE.Raycaster()
   const mouse = new THREE.Vector2()
   
+  const getCanvasCoords = (event) => {
+    if (!currentMesh || !props.canvas2D || !raycaster3D) return null
+    
+    const rect = canvasElement.value.getBoundingClientRect()
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+    
+    raycaster3D.setFromCamera(mouse, camera)
+    
+    const targetObject = activeMesh || currentMesh
+    const intersects = raycaster3D.intersectObject(targetObject, true)
+    
+    if (intersects.length > 0) {
+      const intersection = intersects[0]
+      if (intersection.uv) {
+        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+        const canvasCoords = project3DClickToCanvas(
+          intersection,
+          canvasWidth,
+          canvasHeight,
+          props.workZoneTop,
+          props.workZoneBottom
+        )
+        return canvasCoords
+      }
+    }
+    return null
+  }
+  
+  const onMouseDown = (event) => {
+    if (!props.dragMode) return
+    
+    const canvasCoords = getCanvasCoords(event)
+    if (canvasCoords !== null) {
+      isDragging3D = true
+      lastDragPosition = canvasCoords
+      
+      // Changer le curseur pendant le drag
+      if (renderer && renderer.domElement) {
+        renderer.domElement.style.cursor = 'grabbing'
+      }
+      
+      emit('3d-drag-start', {
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y
+      })
+      
+      // Empêcher les contrôles OrbitControls pendant le drag
+      if (controls) {
+        controls.enabled = false
+      }
+    }
+  }
+  
+  const onMouseMove = (event) => {
+    if (!isDragging3D || !props.dragMode) return
+    
+    const canvasCoords = getCanvasCoords(event)
+    if (canvasCoords !== null) {
+      emit('3d-drag', {
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y
+      })
+      lastDragPosition = canvasCoords
+    }
+  }
+  
+  const onMouseUp = (event) => {
+    if (isDragging3D) {
+      isDragging3D = false
+      lastDragPosition = null
+      
+      // Remettre le curseur normal
+      if (renderer && renderer.domElement) {
+        renderer.domElement.style.cursor = props.dragMode ? 'grab' : 'default'
+      }
+      
+      emit('3d-drag-end')
+      
+      // Réactiver les contrôles OrbitControls
+      if (controls) {
+        controls.enabled = true
+      }
+    }
+  }
+  
   const onCanvasClick = (event) => {
+    // Si on est en mode drag, ne pas gérer les clics simples
+    if (props.dragMode && isDragging3D) return
+    
     if (!currentMesh || !props.canvas2D || !raycaster3D) return
     
     const rect = canvasElement.value.getBoundingClientRect()
@@ -215,21 +327,38 @@ const setupClickHandler = () => {
       
       // Vérifier si l'intersection a des UVs
       if (intersection.uv) {
-        // Convertir le clic 3D en coordonnées canvas 2D
+        // Convertir le clic 3D en coordonnées canvas 2D avec zone de travail
+        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
         const canvasCoords = project3DClickToCanvas(
           intersection,
-          props.canvas2D.width || 800,
-          props.canvas2D.height || 600
+          canvasWidth,
+          canvasHeight,
+          props.workZoneTop,
+          props.workZoneBottom
         )
         
-        if (canvasCoords) {
-          emit('3d-click', {
-            intersection,
-            canvasX: canvasCoords.x,
-            canvasY: canvasCoords.y,
-            uv: intersection.uv,
-            mesh: clickedMesh
-          })
+        if (canvasCoords !== null) {
+          // Si on est en mode placement, émettre l'événement pour placer l'élément
+          if (props.placementMode && props.placementType) {
+            emit('3d-click', {
+              intersection,
+              canvasX: canvasCoords.x,
+              canvasY: canvasCoords.y,
+              uv: intersection.uv,
+              mesh: clickedMesh,
+              placementType: props.placementType
+            })
+          } else {
+            // Sinon, comportement normal (peut être utilisé pour d'autres fonctionnalités)
+            emit('3d-click', {
+              intersection,
+              canvasX: canvasCoords.x,
+              canvasY: canvasCoords.y,
+              uv: intersection.uv,
+              mesh: clickedMesh
+            })
+          }
           
           console.log('✅ Clic sur modèle 3D:', {
             mesh: clickedMesh?.name || 'Sans nom',
@@ -262,19 +391,34 @@ const setupClickHandler = () => {
             
             const newIntersects = raycaster3D.intersectObject(targetObject, true)
             if (newIntersects.length > 0 && newIntersects[0].uv) {
+              const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+              const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
               const newCanvasCoords = project3DClickToCanvas(
                 newIntersects[0],
-                props.canvas2D.width || 800,
-                props.canvas2D.height || 600
+                canvasWidth,
+                canvasHeight,
+                props.workZoneTop,
+                props.workZoneBottom
               )
-              if (newCanvasCoords) {
-                emit('3d-click', {
-                  intersection: newIntersects[0],
-                  canvasX: newCanvasCoords.x,
-                  canvasY: newCanvasCoords.y,
-                  uv: newIntersects[0].uv,
-                  mesh: clickedMesh
-                })
+              if (newCanvasCoords !== null) {
+                if (props.placementMode && props.placementType) {
+                  emit('3d-click', {
+                    intersection: newIntersects[0],
+                    canvasX: newCanvasCoords.x,
+                    canvasY: newCanvasCoords.y,
+                    uv: newIntersects[0].uv,
+                    mesh: clickedMesh,
+                    placementType: props.placementType
+                  })
+                } else {
+                  emit('3d-click', {
+                    intersection: newIntersects[0],
+                    canvasX: newCanvasCoords.x,
+                    canvasY: newCanvasCoords.y,
+                    uv: newIntersects[0].uv,
+                    mesh: clickedMesh
+                  })
+                }
                 console.log('✅ UVs générées et clic projeté avec succès')
               }
             } else {
@@ -286,7 +430,38 @@ const setupClickHandler = () => {
     }
   }
   
+  // Handler pour la molette de la souris pour redimensionner les objets
+  const onMouseWheel = (event) => {
+    // Seulement si un objet est sélectionné en mode drag
+    if (!props.dragMode) return
+    
+    // Empêcher le zoom par défaut de Three.js
+    event.preventDefault()
+    event.stopPropagation()
+    
+    // Calculer le facteur de scale basé sur la direction de la molette
+    // DeltaY positif = scroll down = réduire, négatif = scroll up = agrandir
+    const scaleFactor = event.deltaY > 0 ? 0.95 : 1.05 // 5% par incrément
+    
+    // Émettre l'événement de redimensionnement
+    emit('3d-scale', { scaleFactor })
+  }
+  
+  // Ajouter les event listeners pour le drag
+  renderer.domElement.addEventListener('mousedown', onMouseDown)
+  renderer.domElement.addEventListener('mousemove', onMouseMove)
+  renderer.domElement.addEventListener('mouseup', onMouseUp)
   renderer.domElement.addEventListener('click', onCanvasClick)
+  renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false })
+  
+  // Nettoyer les event listeners au démontage
+  window._threeSceneDragHandlers = {
+    onMouseDown,
+    onMouseMove,
+    onMouseUp,
+    onCanvasClick,
+    onMouseWheel
+  }
   
   // Stocker le handler pour cleanup
   window._threeSceneClickHandler = onCanvasClick
@@ -513,12 +688,12 @@ const generateUVs = (geometry) => {
       const y = positions.getY(i) - center.y
       const z = positions.getZ(i) - center.z
       
-      // Angle autour de l'axe Y (azimuth)
+      // Angle autour de l'axe Y (azimuth) - inversé pour corriger l'inversion horizontale
       const angle = Math.atan2(z, x)
-      const u = (angle / (2 * Math.PI)) + 0.5
+      const u = 1 - ((angle / (2 * Math.PI)) + 0.5)
       
-      // Hauteur normalisée selon Y
-      const v = (y + size.y / 2) / size.y
+      // Hauteur normalisée selon Y - inversé pour corriger l'inversion verticale
+      const v = 1 - ((y + size.y / 2) / size.y)
       
       uvs.push(Math.max(0, Math.min(1, u)))
       uvs.push(Math.max(0, Math.min(1, v)))
@@ -529,8 +704,8 @@ const generateUVs = (geometry) => {
       const x = positions.getX(i) - center.x
       const z = positions.getZ(i) - center.z
       
-      const u = (x + size.x / 2) / size.x
-      const v = (z + size.z / 2) / size.z
+      const u = 1 - ((x + size.x / 2) / size.x)
+      const v = 1 - ((z + size.z / 2) / size.z) // Inversé pour corriger l'inversion verticale
       
       uvs.push(Math.max(0, Math.min(1, u)))
       uvs.push(Math.max(0, Math.min(1, v)))
@@ -549,9 +724,9 @@ const generateUVs = (geometry) => {
         const ny = y / length
         const nz = z / length
         
-        // Coordonnées UV sphériques
-        const u = (Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5
-        const v = (Math.asin(ny) / Math.PI) + 0.5
+        // Coordonnées UV sphériques - inversé pour corriger l'inversion horizontale et verticale
+        const u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
+        const v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
         
         uvs.push(Math.max(0, Math.min(1, u)))
         uvs.push(Math.max(0, Math.min(1, v)))
@@ -672,6 +847,11 @@ const cleanup = () => {
     delete window._threeSceneClickHandler
   }
   
+  // Remove wheel handler
+  if (window._threeSceneDragHandlers && window._threeSceneDragHandlers.onMouseWheel && renderer) {
+    renderer.domElement.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
+  }
+  
   raycaster3D = null
 
   scene = null
@@ -728,6 +908,42 @@ const setActiveMesh = (mesh) => {
   console.log('Mesh actif défini:', mesh.name || 'Mesh sans nom')
 }
 
+// Méthode pour mettre à jour la zone de travail
+const updateWorkZone = (top, bottom) => {
+  console.log('Zone de travail mise à jour dans ThreeScene:', {
+    top: (top * 100).toFixed(1) + '%',
+    bottom: (bottom * 100).toFixed(1) + '%',
+    active: ((1 - top - bottom) * 100).toFixed(1) + '%'
+  })
+  // Les props sont réactives, donc les changements seront automatiquement pris en compte
+}
+
+// Méthode pour mettre à jour le mode placement
+const setPlacementMode = (active, type) => {
+  if (renderer && renderer.domElement) {
+    if (active) {
+      renderer.domElement.style.cursor = 'crosshair'
+      console.log('🎯 Mode placement activé:', type)
+    } else {
+      renderer.domElement.style.cursor = 'default'
+      console.log('Mode placement désactivé')
+    }
+  }
+}
+
+// Méthode pour mettre à jour le mode drag
+const setDragMode = (active) => {
+  if (renderer && renderer.domElement) {
+    if (active) {
+      renderer.domElement.style.cursor = 'grab'
+      console.log('🎯 Mode drag activé - Sélectionnez un objet sur le canvas 2D puis glissez-le sur le modèle 3D')
+    } else {
+      renderer.domElement.style.cursor = 'default'
+      console.log('Mode drag désactivé')
+    }
+  }
+}
+
 // Expose methods for parent component
 defineExpose({
   getCurrentMesh: () => currentMesh,
@@ -741,7 +957,10 @@ defineExpose({
   highlightMesh,
   highlightAllMeshes,
   setActiveMesh,
-  getAllMeshes: () => allMeshes
+  getAllMeshes: () => allMeshes,
+  updateWorkZone,
+  setPlacementMode,
+  setDragMode
 })
 </script>
 

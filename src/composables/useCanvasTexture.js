@@ -39,6 +39,8 @@ export const setupCanvasTexture = (canvas, materials) => {
   texture.magFilter = THREE.LinearFilter
   texture.generateMipmaps = false // Pas de mipmaps pour les canvas (performance)
   texture.flipY = false
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
   texture.format = THREE.RGBAFormat
   texture.needsUpdate = true
 

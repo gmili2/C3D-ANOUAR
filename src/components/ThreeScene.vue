@@ -1,7 +1,19 @@
+<!-- 
+  ThreeScene.vue - Composant pour l'affichage 3D avec Three.js
+  
+  Ce composant gère :
+  - Le chargement et l'affichage de modèles 3D (fichiers OBJ)
+  - La scène Three.js avec caméra, lumières et contrôles
+  - La projection des clics 3D vers le canvas 2D
+  - L'application de textures depuis le canvas 2D
+  - La génération automatique de coordonnées UV si manquantes
+  - Les interactions (clic, drag, zoom) avec le modèle 3D
+-->
 <template>
   <div class="three-scene-container">
+    <!-- Canvas WebGL pour le rendu 3D -->
     <canvas ref="canvasElement" class="three-canvas"></canvas>
-    <!-- TextureUpdater invisible pour surveiller les mises à jour -->
+    <!-- TextureUpdater invisible pour surveiller les mises à jour de texture -->
     <TextureUpdater
       v-if="canvasTexture && renderer && scene && camera"
       ref="textureUpdaterRef"
@@ -14,6 +26,13 @@
 </template>
 
 <script setup>
+/**
+ * SCRIPT SETUP - Configuration du composant Three.js
+ * 
+ * Ce composant initialise une scène Three.js et gère toutes les interactions
+ * avec le modèle 3D, incluant la conversion des coordonnées 3D vers 2D.
+ */
+
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -22,62 +41,81 @@ import { setupCanvasTexture, applyTextureToMesh, useCanvasTextureStore } from '.
 import { project3DClickToCanvas } from '../composables/use3DTo2DProjection'
 import TextureUpdater from './TextureUpdater.vue'
 
+// ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
   modelUrl: {
     type: String,
-    default: null
+    default: null  // URL ou fichier du modèle OBJ à charger
   },
   texture: {
     type: THREE.Texture,
-    default: null
+    default: null  // Texture Three.js optionnelle à appliquer
   },
   canvas2D: {
     type: HTMLCanvasElement,
-    default: null
+    default: null  // Canvas HTML 2D (Fabric.js) pour la texture partagée
   },
   enableDirectEdit: {
     type: Boolean,
-    default: true
+    default: true  // Activer les interactions directes (clic, drag)
   },
   workZoneTop: {
     type: Number,
-    default: 0.1 // 10% par défaut
+    default: 0.1  // 10% par défaut - Zone à exclure du haut
   },
   workZoneBottom: {
     type: Number,
-    default: 0.1 // 10% par défaut
+    default: 0.1  // 10% par défaut - Zone à exclure du bas
   },
   placementMode: {
     type: Boolean,
-    default: false
+    default: false  // Mode placement actif (clic pour placer)
   },
   placementType: {
     type: String,
-    default: null // 'circle', 'rectangle', 'text', 'image'
+    default: null  // 'circle', 'rectangle', 'text', 'image'
   },
   dragMode: {
     type: Boolean,
-    default: false
+    default: false  // Mode drag actif (glisser pour déplacer)
   }
 })
 
-const emit = defineEmits(['model-loaded', 'model-error', 'texture-ready', '3d-click', 'meshes-extracted', '3d-drag', '3d-drag-start', '3d-drag-end', '3d-scale'])
+// ===== ÉVÉNEMENTS ÉMIS =====
+const emit = defineEmits([
+  'model-loaded',      // Modèle 3D chargé avec succès
+  'model-error',       // Erreur lors du chargement
+  'texture-ready',     // Texture partagée prête
+  '3d-click',          // Clic sur le modèle 3D
+  'meshes-extracted',  // Liste des meshes extraits
+  '3d-drag',           // Glissement sur le modèle 3D
+  '3d-drag-start',     // Début du glissement
+  '3d-drag-end',       // Fin du glissement
+  '3d-scale',          // Redimensionnement avec molette
+  '3d-resize-start',   // Début du redimensionnement par bord
+  '3d-resize',         // Redimensionnement en cours par bord
+  '3d-resize-end',     // Fin du redimensionnement par bord
+  '3d-hover'           // Survol du modèle 3D (pour détecter les bords)
+])
 
-let allMeshes = []
-let activeMesh = null
-let highlightedMesh = null
+// ===== ÉTAT INTERNE =====
+let allMeshes = []           // Tous les meshes du modèle
+let activeMesh = null        // Mesh actuellement actif pour l'édition
+let highlightedMesh = null   // Mesh actuellement mis en évidence
 
-const canvasElement = ref(null)
-const textureUpdaterRef = ref(null)
+// ===== RÉFÉRENCES VUE =====
+const canvasElement = ref(null)      // Référence au canvas HTML
+const textureUpdaterRef = ref(null)  // Référence au composant TextureUpdater
 
-let scene = null
-let camera = null
-let renderer = null
-let controls = null
-let currentMesh = null
-let animationId = null
-let handleResize = null
-let canvasTexture = null // Texture partagée du canvas 2D
+// ===== VARIABLES THREE.JS =====
+let scene = null          // Scène Three.js
+let camera = null         // Caméra perspective
+let renderer = null       // Rendu WebGL
+let controls = null       // Contrôles OrbitControls (rotation, zoom, pan)
+let currentMesh = null    // Modèle 3D actuellement chargé
+let animationId = null    // ID de l'animation frame pour cleanup
+let handleResize = null   // Handler pour le redimensionnement
+let canvasTexture = null  // Texture partagée du canvas 2D (Fabric.js)
 
 onMounted(async () => {
   await nextTick()
@@ -116,62 +154,89 @@ watch(() => props.texture, (newTexture) => {
   }
 })
 
+/**
+ * Initialise la scène Three.js
+ * 
+ * Crée la scène, la caméra, le renderer, les lumières et les contrôles.
+ * Configure également la boucle d'animation pour le rendu continu.
+ */
 const initScene = () => {
   if (!canvasElement.value) return
 
+  // Créer la scène avec un fond sombre
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x1a1a1a)
 
+  // Obtenir les dimensions du canvas
   const width = canvasElement.value.clientWidth || 800
   const height = canvasElement.value.clientHeight || 600
 
+  // Créer la caméra perspective
+  // FOV: 75°, ratio d'aspect, near: 0.1, far: 1000
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
-  camera.position.set(0, 0, 5)
+  camera.position.set(0, 0, 5)  // Position initiale de la caméra
 
+  // Créer le renderer WebGL avec antialiasing
   renderer = new THREE.WebGLRenderer({
     canvas: canvasElement.value,
-    antialias: true
+    antialias: true  // Lissage des bords
   })
   renderer.setSize(width, height)
-  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setPixelRatio(window.devicePixelRatio)  // Support des écrans haute résolution
 
-  // Lights
+  // ===== ÉCLAIRAGE =====
+  // Lumière ambiante (éclaire uniformément)
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
   scene.add(ambientLight)
 
+  // Lumière directionnelle principale (simule le soleil)
   const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6)
   directionalLight.position.set(5, 5, 5)
   scene.add(directionalLight)
 
+  // Lumière directionnelle secondaire (pour réduire les ombres dures)
   const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4)
   directionalLight2.position.set(-5, -5, -5)
   scene.add(directionalLight2)
 
-  // Controls
+  // ===== CONTRÔLES =====
+  // OrbitControls permet de faire tourner, zoomer et déplacer la caméra
   controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.05
-  controls.enableZoom = true
-  controls.enablePan = true
+  controls.enableDamping = true        // Amortissement pour un mouvement fluide
+  controls.dampingFactor = 0.05        // Facteur d'amortissement
+  controls.enableZoom = true           // Activer le zoom avec la molette
+  controls.enablePan = true           // Activer le déplacement (pan)
 
-  // Animation loop avec mise à jour de texture
+  // ===== BOUCLE D'ANIMATION =====
+  // Store pour la synchronisation des mises à jour de texture
   const { render2D, resetTextureUpdate } = useCanvasTextureStore()
   
+  /**
+   * Boucle d'animation principale
+   * 
+   * Cette fonction est appelée à chaque frame pour :
+   * 1. Mettre à jour la texture si le canvas 2D a changé
+   * 2. Mettre à jour les contrôles (amortissement)
+   * 3. Rendre la scène
+   */
   const animate = () => {
     animationId = requestAnimationFrame(animate)
     
-    // Vérifier et mettre à jour la texture si nécessaire
+    // Vérifier si le canvas 2D a été modifié et mettre à jour la texture
     if (canvasTexture && render2D.value) {
-      canvasTexture.needsUpdate = true
-      resetTextureUpdate()
+      canvasTexture.needsUpdate = true  // Forcer la mise à jour de la texture
+      resetTextureUpdate()              // Réinitialiser le flag
     }
     
+    // Mettre à jour les contrôles (amortissement)
     if (controls) {
       controls.update()
     }
+    
+    // Rendre la scène
     renderer.render(scene, camera)
   }
-  animate()
+  animate()  // Démarrer la boucle d'animation
 
   // Handle resize
   handleResize = () => {
@@ -196,15 +261,26 @@ const initScene = () => {
   })
 }
 
-let raycaster3D = null
-let isDragging3D = false
-let lastDragPosition = null
+// ===== VARIABLES POUR LES INTERACTIONS =====
+let raycaster3D = null        // Raycaster pour détecter les clics sur le modèle 3D
+let isDragging3D = false      // Indique si on est en train de glisser
+let lastDragPosition = null  // Dernière position du glissement
+let isResizing3D = false     // Flag pour indiquer si on est en mode redimensionnement
+let resizeStartPosition = null // Position de départ du redimensionnement
+let resizeHandleInfo = null   // Informations sur le handle utilisé pour le redimensionnement
 
+/**
+ * Configure les handlers pour les interactions (clic, drag, molette)
+ * 
+ * Utilise un raycaster pour convertir les coordonnées de la souris
+ * en coordonnées 3D et détecter les intersections avec le modèle.
+ */
 const setupClickHandler = () => {
   if (!renderer || !canvasElement.value || raycaster3D) return
   
+  // Créer le raycaster pour détecter les intersections
   raycaster3D = new THREE.Raycaster()
-  const mouse = new THREE.Vector2()
+  const mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
   
   const getCanvasCoords = (event) => {
     if (!currentMesh || !props.canvas2D || !raycaster3D) return null
@@ -241,20 +317,17 @@ const setupClickHandler = () => {
     
     const canvasCoords = getCanvasCoords(event)
     if (canvasCoords !== null) {
-      isDragging3D = true
-      lastDragPosition = canvasCoords
-      
-      // Changer le curseur pendant le drag
-      if (renderer && renderer.domElement) {
-        renderer.domElement.style.cursor = 'grabbing'
-      }
-      
+      // Émettre l'événement pour que le parent détermine si c'est un resize ou un drag
+      // On ne met pas isDragging3D à true tout de suite, on attend la réponse du parent
       emit('3d-drag-start', {
         canvasX: canvasCoords.x,
         canvasY: canvasCoords.y
       })
       
-      // Empêcher les contrôles OrbitControls pendant le drag
+      // On initialise la position mais on n'active pas le drag tout de suite
+      lastDragPosition = canvasCoords
+      
+      // Empêcher les contrôles OrbitControls pendant l'interaction
       if (controls) {
         controls.enabled = false
       }
@@ -262,29 +335,63 @@ const setupClickHandler = () => {
   }
   
   const onMouseMove = (event) => {
-    if (!isDragging3D || !props.dragMode) return
+    if (!props.dragMode) {
+      // Même sans drag actif, vérifier si on survole un bord pour changer le curseur
+      const canvasCoords = getCanvasCoords(event)
+      if (canvasCoords !== null) {
+        emit('3d-hover', {
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y
+        })
+      }
+      return
+    }
     
-    const canvasCoords = getCanvasCoords(event)
-    if (canvasCoords !== null) {
-      emit('3d-drag', {
-        canvasX: canvasCoords.x,
-        canvasY: canvasCoords.y
-      })
-      lastDragPosition = canvasCoords
+    // Si on est en train de cliquer/maintenir (isDragging3D ou isResizing3D)
+    if (isDragging3D || isResizing3D) {
+      const canvasCoords = getCanvasCoords(event)
+      if (canvasCoords !== null) {
+        if (isResizing3D && resizeStartPosition && resizeHandleInfo) {
+          // Mode redimensionnement
+          emit('3d-resize', {
+            canvasX: canvasCoords.x,
+            canvasY: canvasCoords.y,
+            startX: resizeStartPosition.x,
+            startY: resizeStartPosition.y,
+            handleInfo: resizeHandleInfo
+          })
+        } else if (isDragging3D) {
+          // Mode déplacement
+          emit('3d-drag', {
+            canvasX: canvasCoords.x,
+            canvasY: canvasCoords.y
+          })
+        }
+        lastDragPosition = canvasCoords
+      }
     }
   }
   
   const onMouseUp = (event) => {
-    if (isDragging3D) {
-      isDragging3D = false
+    if (isDragging3D || isResizing3D) {
+      if (isResizing3D) {
+        emit('3d-resize-end')
+        isResizing3D = false
+        resizeStartPosition = null
+        resizeHandleInfo = null
+      }
+      
+      if (isDragging3D) {
+        emit('3d-drag-end')
+        isDragging3D = false
+      }
+      
       lastDragPosition = null
       
       // Remettre le curseur normal
       if (renderer && renderer.domElement) {
         renderer.domElement.style.cursor = props.dragMode ? 'grab' : 'default'
       }
-      
-      emit('3d-drag-end')
       
       // Réactiver les contrôles OrbitControls
       if (controls) {
@@ -432,16 +539,19 @@ const setupClickHandler = () => {
   
   // Handler pour la molette de la souris pour redimensionner les objets
   const onMouseWheel = (event) => {
-    // Seulement si un objet est sélectionné en mode drag
+    // Seulement si un objet est sélectionné (en mode drag ou non)
+    // On vérifie si dragMode est actif, ce qui signifie qu'un objet est sélectionné
     if (!props.dragMode) return
     
-    // Empêcher le zoom par défaut de Three.js
+    // Empêcher le zoom par défaut de Three.js et OrbitControls
     event.preventDefault()
     event.stopPropagation()
     
     // Calculer le facteur de scale basé sur la direction de la molette
     // DeltaY positif = scroll down = réduire, négatif = scroll up = agrandir
-    const scaleFactor = event.deltaY > 0 ? 0.95 : 1.05 // 5% par incrément
+    // Utiliser un facteur plus fin pour un contrôle plus précis
+    const delta = event.deltaY > 0 ? 1 : -1
+    const scaleFactor = 1 + (delta * 0.02) // 2% par incrément pour plus de précision
     
     // Émettre l'événement de redimensionnement
     emit('3d-scale', { scaleFactor })
@@ -525,11 +635,46 @@ const loadModel = async (url) => {
       throw new Error('Format de fichier non supporté')
     }
 
+    // Vérifier que le modèle ne contient pas de NaN dans les positions
+    let hasInvalidGeometry = false
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        const positions = child.geometry.attributes.position
+        if (positions) {
+          for (let i = 0; i < positions.count; i++) {
+            const x = positions.getX(i)
+            const y = positions.getY(i)
+            const z = positions.getZ(i)
+            if (isNaN(x) || isNaN(y) || isNaN(z) || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+              hasInvalidGeometry = true
+              console.error(`❌ Position invalide trouvée dans le mesh "${child.name || 'sans nom'}":`, { x, y, z, index: i })
+            }
+          }
+        }
+      }
+    })
+    
+    if (hasInvalidGeometry) {
+      throw new Error('Le modèle contient des coordonnées invalides (NaN ou Infinity). Vérifiez le fichier OBJ.')
+    }
+
     // Calculate bounding box and center the model
     const box = new THREE.Box3().setFromObject(obj)
     const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
+    
+    // Vérifier que la bounding box est valide
+    if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
+        isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
+      throw new Error('Le modèle contient des coordonnées invalides (NaN). Vérifiez le fichier OBJ.')
+    }
+    
     const maxDim = Math.max(size.x, size.y, size.z)
+    
+    // Vérifier que maxDim est valide
+    if (maxDim <= 0 || !isFinite(maxDim)) {
+      throw new Error('Le modèle a une taille invalide. Impossible de le charger.')
+    }
 
     // Scale to fit in view
     const scale = 3 / maxDim
@@ -664,25 +809,74 @@ const setupSharedCanvasTexture = (htmlCanvas) => {
 }
 
 /**
- * Génère des UVs pour une géométrie avec projection cylindrique améliorée
+ * Génère des coordonnées UV pour une géométrie sans UVs
+ * 
+ * Les coordonnées UV sont nécessaires pour mapper une texture 2D sur une surface 3D.
+ * Cette fonction choisit automatiquement la meilleure méthode de projection selon
+ * la forme de l'objet :
+ * - Cylindrique : pour objets verticaux (bocal, t-shirt, etc.)
+ * - Plane : pour objets plats
+ * - Sphérique : pour objets arrondis
+ * 
+ * @param {THREE.BufferGeometry} geometry - La géométrie à traiter
  */
 const generateUVs = (geometry) => {
   const positions = geometry.attributes.position
   const uvs = []
   
-  if (!positions) return
+  if (!positions || positions.count === 0) {
+    console.warn('⚠️ Géométrie sans positions valides')
+    return
+  }
   
-  // Calculer la bounding box pour normaliser
+  // Vérifier que les positions ne contiennent pas de NaN
+  let hasInvalidPositions = false
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i)
+    const y = positions.getY(i)
+    const z = positions.getZ(i)
+    if (isNaN(x) || isNaN(y) || isNaN(z) || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+      hasInvalidPositions = true
+      console.warn(`⚠️ Position invalide à l'index ${i}:`, { x, y, z })
+      break
+    }
+  }
+  
+  if (hasInvalidPositions) {
+    console.error('❌ La géométrie contient des positions invalides (NaN ou Infinity). Impossible de générer les UVs.')
+    return
+  }
+  
+  // Calculer la bounding box pour normaliser les coordonnées
   const box = new THREE.Box3().setFromBufferAttribute(positions)
   const size = box.getSize(new THREE.Vector3())
   const center = box.getCenter(new THREE.Vector3())
   
-  // Déterminer la meilleure projection selon la forme
-  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8 // Forme verticale
-  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5
+  // Vérifier que la taille est valide (non nulle)
+  if (size.x === 0 && size.y === 0 && size.z === 0) {
+    console.warn('⚠️ Géométrie avec taille nulle, utilisation de valeurs par défaut')
+    // Utiliser une taille minimale pour éviter les divisions par zéro
+    size.x = size.x || 1
+    size.y = size.y || 1
+    size.z = size.z || 1
+  }
+  
+  // Vérifier que les valeurs sont valides
+  if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
+      isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
+    console.error('❌ Bounding box invalide (NaN). Impossible de générer les UVs.')
+    return
+  }
+  
+  // Déterminer la meilleure projection selon la forme de l'objet
+  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8  // Forme verticale
+  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5        // Forme plate
   
   if (isCylindrical) {
-    // Projection cylindrique pour objets verticaux (bocal, etc.)
+    // ===== PROJECTION CYLINDRIQUE =====
+    // Pour objets verticaux (t-shirt, bocal, etc.)
+    // U = angle autour de l'axe Y (0-1)
+    // V = hauteur (0-1)
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const y = positions.getY(i) - center.y
@@ -690,57 +884,106 @@ const generateUVs = (geometry) => {
       
       // Angle autour de l'axe Y (azimuth) - inversé pour corriger l'inversion horizontale
       const angle = Math.atan2(z, x)
-      const u = 1 - ((angle / (2 * Math.PI)) + 0.5)
+      let u = 1 - ((angle / (2 * Math.PI)) + 0.5)
       
       // Hauteur normalisée selon Y - inversé pour corriger l'inversion verticale
-      const v = 1 - ((y + size.y / 2) / size.y)
+      // Protection contre division par zéro
+      let v = size.y > 0 ? 1 - ((y + size.y / 2) / size.y) : 0.5
+      
+      // Vérifier et corriger les NaN
+      if (isNaN(u) || !isFinite(u)) u = 0.5
+      if (isNaN(v) || !isFinite(v)) v = 0.5
       
       uvs.push(Math.max(0, Math.min(1, u)))
       uvs.push(Math.max(0, Math.min(1, v)))
     }
   } else if (isWide) {
-    // Projection plane pour objets plats (XZ plane)
+    // ===== PROJECTION PLANE =====
+    // Pour objets plats (plan XZ)
+    // U = position X (0-1)
+    // V = position Z (0-1)
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const z = positions.getZ(i) - center.z
       
-      const u = 1 - ((x + size.x / 2) / size.x)
-      const v = 1 - ((z + size.z / 2) / size.z) // Inversé pour corriger l'inversion verticale
+      // Protection contre division par zéro
+      let u = size.x > 0 ? 1 - ((x + size.x / 2) / size.x) : 0.5
+      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5  // Inversé pour corriger l'inversion verticale
+      
+      // Vérifier et corriger les NaN
+      if (isNaN(u) || !isFinite(u)) u = 0.5
+      if (isNaN(v) || !isFinite(v)) v = 0.5
       
       uvs.push(Math.max(0, Math.min(1, u)))
       uvs.push(Math.max(0, Math.min(1, v)))
     }
   } else {
-    // Projection sphérique pour objets arrondis
+    // ===== PROJECTION SPHÉRIQUE =====
+    // Pour objets arrondis
+    // Utilise les coordonnées sphériques pour mapper la texture
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const y = positions.getY(i) - center.y
       const z = positions.getZ(i) - center.z
       
-      // Normaliser pour la sphère
+      // Normaliser pour obtenir un vecteur unitaire
       const length = Math.sqrt(x * x + y * y + z * z)
-      if (length > 0) {
+      if (length > 0.0001) { // Utiliser un seuil minimal au lieu de 0
         const nx = x / length
         const ny = y / length
         const nz = z / length
         
-        // Coordonnées UV sphériques - inversé pour corriger l'inversion horizontale et verticale
-        const u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
-        const v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
+        // Coordonnées UV sphériques - inversé pour corriger l'inversion
+        let u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
+        let v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
+        
+        // Vérifier et corriger les NaN
+        if (isNaN(u) || !isFinite(u)) u = 0.5
+        if (isNaN(v) || !isFinite(v)) v = 0.5
         
         uvs.push(Math.max(0, Math.min(1, u)))
         uvs.push(Math.max(0, Math.min(1, v)))
       } else {
+        // Point à l'origine : coordonnées par défaut
         uvs.push(0.5, 0.5)
       }
     }
   }
   
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-  console.log('✅ UVs générées avec projection adaptée', {
-    type: isCylindrical ? 'cylindrique' : isWide ? 'plane' : 'sphérique',
-    vertexCount: positions.count
-  })
+  // Vérifier que tous les UVs sont valides avant de les ajouter
+  let hasInvalidUVs = false
+  for (let i = 0; i < uvs.length; i++) {
+    if (isNaN(uvs[i]) || !isFinite(uvs[i])) {
+      hasInvalidUVs = true
+      console.warn(`⚠️ UV invalide à l'index ${i}:`, uvs[i])
+      // Corriger les valeurs invalides
+      uvs[i] = 0.5
+    }
+  }
+  
+  if (hasInvalidUVs) {
+    console.warn('⚠️ Certains UVs étaient invalides et ont été corrigés')
+  }
+  
+  // Vérifier que le nombre d'UVs correspond au nombre de vertices
+  if (uvs.length !== positions.count * 2) {
+    console.error(`❌ Nombre d'UVs incorrect: ${uvs.length} attendu ${positions.count * 2}`)
+    return
+  }
+  
+  // Ajouter les UVs à la géométrie
+  try {
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+    // Marquer l'attribut comme mis à jour
+    geometry.attributes.uv.needsUpdate = true
+    console.log('✅ UVs générées avec projection adaptée', {
+      type: isCylindrical ? 'cylindrique' : isWide ? 'plane' : 'sphérique',
+      vertexCount: positions.count,
+      uvCount: uvs.length / 2
+    })
+  } catch (error) {
+    console.error('❌ Erreur lors de l\'ajout des UVs à la géométrie:', error)
+  }
 }
 
 const applyTexture = (texture) => {
@@ -944,6 +1187,45 @@ const setDragMode = (active) => {
   }
 }
 
+/**
+ * Configure le mode redimensionnement dans ThreeScene
+ * 
+ * @param {boolean} resizing - true si on est en mode redimensionnement
+ * @param {Object} startPos - Position de départ {x, y}
+ * @param {Object} handleInfo - Informations sur le handle
+ */
+const setResizing = (resizing, startPos, handleInfo) => {
+  isResizing3D = resizing
+  if (resizing) {
+    resizeStartPosition = startPos
+    resizeHandleInfo = handleInfo
+    // Activer aussi isDragging3D pour que onMouseMove fonctionne
+    isDragging3D = true
+    // Changer le curseur
+    if (renderer && renderer.domElement) {
+      renderer.domElement.style.cursor = 'grabbing'
+    }
+  } else {
+    resizeStartPosition = null
+    resizeHandleInfo = null
+  }
+}
+
+/**
+ * Configure l'état du drag dans ThreeScene
+ * 
+ * @param {boolean} dragging - true si on est en mode drag
+ */
+const setDragState = (dragging) => {
+  isDragging3D = dragging
+  if (dragging) {
+    // Changer le curseur
+    if (renderer && renderer.domElement) {
+      renderer.domElement.style.cursor = 'grabbing'
+    }
+  }
+}
+
 // Expose methods for parent component
 defineExpose({
   getCurrentMesh: () => currentMesh,
@@ -960,7 +1242,11 @@ defineExpose({
   getAllMeshes: () => allMeshes,
   updateWorkZone,
   setPlacementMode,
-  setDragMode
+  setDragMode,
+  setResizing,
+  setDragState,
+  renderer,
+  emit
 })
 </script>
 

@@ -1,8 +1,24 @@
+<!-- 
+  DesignStudio.vue - Composant principal de l'application
+  
+  Ce composant coordonne l'interaction entre :
+  - ThreeScene : Affiche le modèle 3D (OBJ) avec Three.js
+  - FabricDesigner : Permet de créer des designs 2D sur un canvas avec Fabric.js
+  
+  Fonctionnalités principales :
+  - Upload de modèles 3D (.obj)
+  - Synchronisation en temps réel entre le canvas 2D et la texture 3D
+  - Placement direct d'éléments sur le modèle 3D en cliquant
+  - Déplacement d'objets en glissant sur le modèle 3D
+  - Gestion des zones de travail (exclusion de zones haut/bas)
+-->
 <template>
   <div class="design-studio">
+    <!-- En-tête avec les actions principales -->
     <div class="studio-header">
       <h1>Studio de Design 3D</h1>
       <div class="header-actions">
+        <!-- Bouton pour uploader un fichier OBJ -->
         <label for="obj-upload" class="upload-btn">
           <input
             id="obj-upload"
@@ -13,22 +29,17 @@
           />
           📁 Uploader un modèle 3D (.obj)
         </label>
-        <!-- <button @click="applyDesignToModel" class="apply-btn" :disabled="!hasModel || !hasDesign">
-          ✨ Appliquer le design sur le modèle
+        <!-- Bouton pour basculer entre vue 2D et 3D -->
+        <button @click="toggleView" class="view-toggle-btn">
+          {{ currentView === '3d' ? '🎨 Vue 2D' : '🎯 Vue 3D' }}
         </button>
-        <button @click="showMeshSelector = !showMeshSelector" class="mesh-selector-btn" :disabled="!hasModel">
-          🧩 Pièces du modèle
-        </button>
-        <label class="toggle-realtime">
-          <input type="checkbox" v-model="realTimeUpdateEnabled" />
-          <span>Temps réel</span>
-        </label> -->
       </div>
     </div>
 
     <div class="studio-content">
-      <!-- Three.js Scene -->
-      <div class="scene-panel" :class="{ 'full-width': !showDesigner }">
+      <!-- Vue 3D - Prend 100% de l'écran quand active -->
+      <!-- Utiliser v-show au lieu de v-if pour préserver les éléments -->
+      <div v-show="currentView === '3d'" class="view-panel view-3d">
         <ThreeScene
           ref="threeSceneRef"
           :model-url="uploadedModel"
@@ -48,14 +59,18 @@
           @3d-drag-start="on3DDragStart"
           @3d-drag-end="on3DDragEnd"
           @3d-scale="on3DScale"
+          @3d-resize-start="on3DResizeStart"
+          @3d-resize="on3DResize"
+          @3d-resize-end="on3DResizeEnd"
+          @3d-hover="on3DHover"
         />
       </div>
 
-      <!-- Fabric.js Designer -->
-      <div v-if="showDesigner" class="designer-panel">
+      <!-- Vue 2D - Prend 100% de l'écran quand active -->
+      <!-- Utiliser v-show au lieu de v-if pour préserver les éléments -->
+      <div v-show="currentView === '2d'" class="view-panel view-2d">
         <div class="panel-header">
           <h3>Canvas de Design 2D</h3>
-          <button @click="toggleDesigner" class="toggle-btn">✕</button>
         </div>
         
         <!-- Contrôles de zone de travail -->
@@ -108,11 +123,6 @@
           @move-object="onMoveObject"
         />
       </div>
-
-      <!-- Toggle button for designer -->
-      <button v-if="!showDesigner" @click="toggleDesigner" class="floating-btn">
-        🎨 Ouvrir le designer
-      </button>
     </div>
 
     <!-- Mesh Selector Panel -->
@@ -143,44 +153,78 @@
 </template>
 
 <script setup>
+/**
+ * SCRIPT SETUP - Configuration principale du composant
+ * 
+ * Ce composant utilise Vue 3 Composition API avec <script setup>
+ * pour gérer l'état et la logique de l'application de design 3D.
+ */
+
 import { ref, computed, nextTick } from 'vue'
 import ThreeScene from './components/ThreeScene.vue'
 import FabricDesigner from './components/FabricDesigner.vue'
 import MeshSelector from './components/MeshSelector.vue'
 import * as THREE from 'three'
 
-const threeSceneRef = ref(null)
-const fabricDesignerRef = ref(null)
+// ===== RÉFÉRENCES AUX COMPOSANTS ENFANTS =====
+// Références pour accéder aux méthodes exposées par les composants enfants
+const threeSceneRef = ref(null)      // Référence au composant ThreeScene (affichage 3D)
+const fabricDesignerRef = ref(null)  // Référence au composant FabricDesigner (canvas 2D)
 
-const uploadedModel = ref(null)
-const appliedTexture = ref(null)
-const showDesigner = ref(true)
-const errorMessage = ref('')
-const realTimeUpdateEnabled = ref(true)
-let updateTextureTimeout = null
-const fabricCanvasElement = ref(null) // Référence au canvas HTML Fabric.js
-const showMeshSelector = ref(false)
-const modelMeshes = ref([])
-const selectedMesh = ref(null)
-const workZoneTop = ref(10) // Pourcentage à exclure du haut (défaut 10%)
-const workZoneBottom = ref(10) // Pourcentage à exclure du bas (défaut 10%)
-const placementMode = ref(false) // Mode de placement actif
-const placementType = ref(null) // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
-const dragMode = ref(false) // Mode drag actif pour déplacer un objet
-const isDragging = ref(false) // Indique si on est en train de glisser
+// ===== ÉTAT DE L'APPLICATION =====
+const uploadedModel = ref(null)              // Fichier OBJ uploadé par l'utilisateur
+const appliedTexture = ref(null)            // Texture Three.js appliquée sur le modèle 3D
+const showDesigner = ref(true)               // Afficher/masquer le panneau de design (déprécié, utiliser currentView)
+const currentView = ref('3d')                // Vue actuelle: '2d' ou '3d'
+const errorMessage = ref('')                 // Message d'erreur à afficher
+const realTimeUpdateEnabled = ref(true)      // Activer/désactiver les mises à jour en temps réel
+let updateTextureTimeout = null              // Timeout pour debounce les mises à jour de texture
+const fabricCanvasElement = ref(null)        // Référence au canvas HTML Fabric.js (pour la texture partagée)
+const showMeshSelector = ref(false)          // Afficher/masquer le sélecteur de meshes
+const modelMeshes = ref([])                  // Liste de tous les meshes du modèle 3D
+const selectedMesh = ref(null)               // Mesh actuellement sélectionné
 
+// ===== CONFIGURATION DES ZONES DE TRAVAIL =====
+// Ces valeurs définissent les zones du canvas où on ne peut pas placer d'éléments
+// Utile pour exclure certaines parties du modèle (manches, col, etc.)
+const workZoneTop = ref(10)      // Pourcentage à exclure du haut (défaut 10%)
+const workZoneBottom = ref(10)  // Pourcentage à exclure du bas (défaut 10%)
+
+// ===== MODES D'INTERACTION =====
+const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
+const placementType = ref(null)   // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
+const dragMode = ref(false)       // Mode drag actif pour déplacer un objet sélectionné
+const isDragging = ref(false)    // Indique si on est en train de glisser un objet
+
+// ===== COMPUTED PROPERTIES (Propriétés calculées) =====
+/**
+ * Vérifie si un modèle 3D est chargé
+ */
 const hasModel = computed(() => uploadedModel.value !== null)
-let highlightedMeshIndex = ref(-1)
+
+let highlightedMeshIndex = ref(-1)  // Index du mesh actuellement mis en évidence
+
+/**
+ * Vérifie si le canvas 2D contient des objets (design)
+ */
 const hasDesign = computed(() => {
   if (!fabricDesignerRef.value || !fabricDesignerRef.value.getCanvas) return false
   const canvas = fabricDesignerRef.value.getCanvas()
   return canvas && canvas.getObjects().length > 0
 })
 
+// ===== GESTION DE L'UPLOAD DE FICHIERS =====
+/**
+ * Gère l'upload d'un fichier OBJ
+ * Valide le format et réinitialise la texture si nécessaire
+ * 
+ * @param {Event} event - Événement de changement de fichier
+ */
 const handleFileUpload = async (event) => {
   const file = event.target.files?.[0]
   if (!file) return
 
+  // Validation : vérifier que c'est bien un fichier .obj
   if (!file.name.toLowerCase().endsWith('.obj')) {
     errorMessage.value = 'Veuillez sélectionner un fichier .obj'
     setTimeout(() => {
@@ -192,21 +236,34 @@ const handleFileUpload = async (event) => {
   errorMessage.value = ''
   uploadedModel.value = file
 
-  // Reset applied texture when new model is loaded
+  // Réinitialiser la texture appliquée quand un nouveau modèle est chargé
+  // pour éviter les conflits de textures
   if (appliedTexture.value) {
     appliedTexture.value.dispose()
     appliedTexture.value = null
   }
 }
 
+// ===== GESTION DU CHARGEMENT DU MODÈLE 3D =====
+/**
+ * Callback appelé quand un modèle 3D est chargé avec succès
+ * 
+ * Cette fonction :
+ * 1. Extrait tous les meshes du modèle
+ * 2. Vérifie la présence de coordonnées UV (nécessaires pour les textures)
+ * 3. Configure la texture partagée entre le canvas 2D et le modèle 3D
+ * 
+ * @param {THREE.Object3D} mesh - Le modèle 3D chargé (groupe de meshes)
+ */
 const onModelLoaded = async (mesh) => {
   console.log('Modèle 3D chargé avec succès', mesh)
   errorMessage.value = ''
   
-  // Extraire tous les meshes du modèle
+  // Extraire tous les meshes individuels du modèle pour l'inspection/édition
   extractModelMeshes(mesh)
   
-  // Vérifier si les meshes ont des UVs
+  // Vérifier si les meshes ont des coordonnées UV
+  // Les UVs sont nécessaires pour mapper la texture 2D sur la surface 3D
   let hasUVs = true
   mesh.traverse((child) => {
     if (child instanceof THREE.Mesh && child.geometry) {
@@ -219,12 +276,13 @@ const onModelLoaded = async (mesh) => {
   if (!hasUVs) {
     console.log('ℹ️ Le modèle n\'a pas de coordonnées UV. Les UVs seront générées automatiquement.')
     // Ne pas afficher d'erreur, juste informer dans la console
+    // Les UVs seront générées automatiquement dans ThreeScene
   }
   
-  // Attendre que le canvas Fabric.js soit prêt
+  // Attendre que le canvas Fabric.js soit prêt (rendu Vue)
   await nextTick()
   
-  // Récupérer le canvas HTML depuis Fabric.js
+  // Récupérer le canvas HTML depuis Fabric.js pour créer la texture partagée
   if (fabricDesignerRef.value) {
     const fabricCanvas = fabricDesignerRef.value.getCanvas()
     if (fabricCanvas) {
@@ -236,6 +294,7 @@ const onModelLoaded = async (mesh) => {
         await nextTick()
         
         // Configurer la texture partagée dans ThreeScene
+        // Cette texture lie le canvas 2D au modèle 3D pour un rendu en temps réel
         if (threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
           threeSceneRef.value.setupSharedCanvasTexture(htmlCanvas)
         }
@@ -244,16 +303,28 @@ const onModelLoaded = async (mesh) => {
   }
 }
 
+/**
+ * Extrait tous les meshes individuels d'un modèle 3D
+ * 
+ * Parcourt récursivement l'objet 3D et collecte tous les meshes
+ * avec leurs informations (nom, nombre de vertices, présence d'UVs, matériau)
+ * 
+ * @param {THREE.Object3D} obj - Le modèle 3D à analyser
+ */
 const extractModelMeshes = (obj) => {
   modelMeshes.value = []
   let index = 0
   
+  // Parcourir récursivement tous les enfants du modèle
   obj.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       const geometry = child.geometry
+      // Compter les vertices (points 3D)
       const vertexCount = geometry.attributes.position ? geometry.attributes.position.count : 0
+      // Vérifier la présence de coordonnées UV
       const hasUVs = geometry.attributes.uv ? true : false
       
+      // Stocker les informations du mesh
       modelMeshes.value.push({
         index: index++,
         mesh: child,
@@ -313,27 +384,61 @@ const onTextureReady = (texture) => {
   appliedTexture.value = texture
 }
 
+// ===== GESTION DES INTERACTIONS 3D =====
+/**
+ * Gère le clic sur le modèle 3D pour placer un élément directement
+ * 
+ * Quand l'utilisateur clique sur le modèle 3D en mode placement,
+ * les coordonnées 3D sont converties en coordonnées 2D du canvas
+ * et l'élément est placé à cette position.
+ * 
+ * @param {Object} clickData - Données du clic contenant canvasX, canvasY, etc.
+ */
 const on3DClickForPlacement = (clickData) => {
-  // Si on n'est pas en mode placement, ignorer
-  if (!placementMode.value || !placementType.value) {
-    return
-  }
-  
   // Vérifier que le clic est dans la zone active (pas null)
-  if (clickData.canvasX === undefined || clickData.canvasY === undefined || clickData.canvasX === null || clickData.canvasY === null) {
-    console.warn('⚠️ Clic hors zone de travail, élément non placé')
+  // Les clics hors zone retournent null
+  if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
+      clickData.canvasX === null || clickData.canvasY === null) {
+    console.warn('⚠️ Clic hors zone de travail')
     return
   }
   
-  console.log('🎯 Placement direct sur modèle 3D:', {
-    type: placementType.value,
-    position: clickData.canvasX + ', ' + clickData.canvasY
-  })
+  // Si on est en mode placement, placer un nouvel élément
+  if (placementMode.value && placementType.value) {
+    console.log('🎯 Placement direct sur modèle 3D:', {
+      type: placementType.value,
+      position: clickData.canvasX + ', ' + clickData.canvasY
+    })
+    
+    // Placer l'élément sur le canvas 2D à la position correspondante du clic 3D
+    if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
+      fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
+      // Le mode placement sera désactivé automatiquement par placeElementAt
+    }
+    return
+  }
   
-  // Placer l'élément sur le canvas 2D à la position du clic
-  if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
-    fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
-    // Le mode placement sera désactivé automatiquement par placeElementAt
+  // Sinon, sélectionner l'objet à cette position sur le modèle 3D
+  if (fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition) {
+    const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)
+    if (found) {
+      console.log('✅ Objet sélectionné depuis le modèle 3D à la position:', {
+        x: clickData.canvasX,
+        y: clickData.canvasY
+      })
+      // Activer le mode drag après sélection pour pouvoir déplacer immédiatement
+      dragMode.value = true
+      if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+        threeSceneRef.value.setDragMode(true)
+      }
+    } else {
+      console.log('ℹ️ Aucun objet trouvé à cette position sur le modèle 3D')
+      // Désactiver le mode drag si aucun objet n'est trouvé
+      dragMode.value = false
+      if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+        threeSceneRef.value.setDragMode(false)
+      }
+    }
   }
 }
 
@@ -394,14 +499,124 @@ const onMoveObject = (data) => {
   console.log('Objet déplacé:', data)
 }
 
+// Variables pour le redimensionnement
+const isResizing = ref(false)
+const resizeStartPos = ref({ x: 0, y: 0 })
+const currentResizeHandle = ref(null)
+
+// Variables pour le drag - stocker le décalage initial entre le clic et l'objet
+const dragStartPos = ref({ x: 0, y: 0 })
+const dragOffset = ref({ x: 0, y: 0 })
+
 const on3DDragStart = (clickData) => {
   if (!dragMode.value) return
+  
+  // Vérifier que les coordonnées sont valides
+  if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
+      clickData.canvasX === null || clickData.canvasY === null) {
+    return
+  }
+  
+  // Vérifier si on est près d'un bord pour redimensionner
+  if (fabricDesignerRef.value && fabricDesignerRef.value.getCanvas) {
+    const canvas = fabricDesignerRef.value.getCanvas()
+    const activeObject = canvas?.getActiveObject()
+    
+    if (activeObject && fabricDesignerRef.value.detectResizeHandle) {
+      const handleInfo = fabricDesignerRef.value.detectResizeHandle(
+        activeObject,
+        clickData.canvasX,
+        clickData.canvasY
+      )
+      
+      if (handleInfo) {
+        // Commencer le redimensionnement
+        isResizing.value = true
+        isDragging.value = false // Désactiver le drag
+        resizeStartPos.value = { x: clickData.canvasX, y: clickData.canvasY }
+        currentResizeHandle.value = handleInfo
+        
+        // Notifier ThreeScene qu'on est en mode resize
+        if (threeSceneRef.value && threeSceneRef.value.setResizing) {
+          threeSceneRef.value.setResizing(true, {
+            x: clickData.canvasX,
+            y: clickData.canvasY
+          }, handleInfo)
+        }
+        
+        // Activer le flag de drag dans ThreeScene pour que onMouseMove fonctionne
+        if (threeSceneRef.value && threeSceneRef.value.setDragState) {
+          threeSceneRef.value.setDragState(true)
+        }
+        
+        console.log('📏 Début du redimensionnement sur 3D:', handleInfo)
+        return
+      }
+    }
+  }
+  
+  // Sinon, c'est un déplacement normal
   isDragging.value = true
-  console.log('🎯 Début du drag sur 3D:', clickData)
+  isResizing.value = false
+  
+  // Calculer le décalage entre le point de clic et la position actuelle de l'objet
+  if (fabricDesignerRef.value && fabricDesignerRef.value.getCanvas) {
+    const canvas = fabricDesignerRef.value.getCanvas()
+    const activeObject = canvas?.getActiveObject()
+    
+    if (activeObject) {
+      // Obtenir les dimensions de l'objet (avec le scale appliqué)
+      const objWidth = (activeObject.width || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleX || 1)
+      const objHeight = (activeObject.height || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleY || 1)
+      
+      // Obtenir l'origine de l'objet
+      const originX = activeObject.originX || 'left'
+      const originY = activeObject.originY || 'top'
+      
+      // Calculer la position du coin haut-gauche de l'objet
+      let objLeft = activeObject.left || 0
+      let objTop = activeObject.top || 0
+      
+      if (originX === 'center') {
+        objLeft = objLeft - objWidth / 2
+      } else if (originX === 'right') {
+        objLeft = objLeft - objWidth
+      }
+      
+      if (originY === 'center') {
+        objTop = objTop - objHeight / 2
+      } else if (originY === 'bottom') {
+        objTop = objTop - objHeight
+      }
+      
+      // Calculer le décalage entre le point de clic et le coin haut-gauche de l'objet
+      dragOffset.value = {
+        x: clickData.canvasX - objLeft,
+        y: clickData.canvasY - objTop
+      }
+      
+      dragStartPos.value = { x: clickData.canvasX, y: clickData.canvasY }
+    }
+  }
+  
+  // Activer le flag de drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragState) {
+    threeSceneRef.value.setDragState(true)
+  }
+  
+  console.log('🎯 Début du drag sur 3D:', clickData, 'Offset:', dragOffset.value)
 }
 
+/**
+ * Gère le glissement (drag) sur le modèle 3D pour déplacer un objet 2D
+ * 
+ * Quand l'utilisateur glisse sur le modèle 3D avec un objet sélectionné,
+ * l'objet est déplacé sur le canvas 2D en suivant la position du curseur 3D.
+ * 
+ * @param {Object} clickData - Données du clic contenant canvasX, canvasY
+ */
 const on3DDrag = (clickData) => {
-  if (!dragMode.value || !isDragging.value) return
+  if (!dragMode.value || !isDragging.value || isResizing.value) return
   
   // Vérifier que le clic est dans la zone active
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
@@ -409,24 +624,179 @@ const on3DDrag = (clickData) => {
     return
   }
   
-  // Déplacer l'objet sélectionné
+  // Calculer la position de l'objet en soustrayant le décalage initial
+  const targetX = clickData.canvasX - dragOffset.value.x
+  const targetY = clickData.canvasY - dragOffset.value.y
+  
+  // Déplacer l'objet sélectionné sur le canvas 2D
   if (fabricDesignerRef.value && fabricDesignerRef.value.moveSelectedObject) {
-    fabricDesignerRef.value.moveSelectedObject(clickData.canvasX, clickData.canvasY)
+    fabricDesignerRef.value.moveSelectedObject(targetX, targetY)
   }
 }
 
+/**
+ * Gère le survol du modèle 3D pour détecter les bords de redimensionnement
+ * 
+ * @param {Object} hoverData - Données contenant canvasX, canvasY
+ */
+const on3DHover = (hoverData) => {
+  if (!dragMode.value || !fabricDesignerRef.value) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  const activeObject = canvas?.getActiveObject()
+  
+  if (!activeObject) return
+  
+  // Vérifier si on est près d'un bord pour changer le curseur
+  if (fabricDesignerRef.value.detectResizeHandle) {
+    const handleInfo = fabricDesignerRef.value.detectResizeHandle(
+      activeObject,
+      hoverData.canvasX,
+      hoverData.canvasY
+    )
+    
+    if (handleInfo && threeSceneRef.value && threeSceneRef.value.renderer) {
+      // Changer le curseur selon le type de handle
+      let cursor = 'grab'
+      if (handleInfo.corner) {
+        // Curseur diagonal pour les coins
+        if (handleInfo.corner === 'tl' || handleInfo.corner === 'br') {
+          cursor = 'nwse-resize'
+        } else {
+          cursor = 'nesw-resize'
+        }
+      } else if (handleInfo.edge === 'left' || handleInfo.edge === 'right') {
+        cursor = 'ew-resize'
+      } else if (handleInfo.edge === 'top' || handleInfo.edge === 'bottom') {
+        cursor = 'ns-resize'
+      }
+      
+      threeSceneRef.value.renderer.domElement.style.cursor = cursor
+    } else if (threeSceneRef.value && threeSceneRef.value.renderer) {
+      threeSceneRef.value.renderer.domElement.style.cursor = 'grab'
+    }
+  }
+}
+
+/**
+ * Gère le début du redimensionnement depuis le modèle 3D
+ * 
+ * @param {Object} resizeData - Données contenant canvasX, canvasY, handleInfo
+ */
+const on3DResizeStart = (resizeData) => {
+  isResizing.value = true
+  resizeStartPos.value = { x: resizeData.canvasX, y: resizeData.canvasY }
+  currentResizeHandle.value = resizeData.handleInfo
+  console.log('📏 Début du redimensionnement depuis 3D:', resizeData)
+}
+
+/**
+ * Gère le redimensionnement en cours depuis le modèle 3D
+ * 
+ * @param {Object} resizeData - Données contenant canvasX, canvasY, startX, startY, handleInfo
+ */
+const on3DResize = (resizeData) => {
+  if (!dragMode.value || !isResizing.value) return
+  
+  // Vérifier que les coordonnées sont valides
+  if (resizeData.canvasX === undefined || resizeData.canvasY === undefined || 
+      resizeData.canvasX === null || resizeData.canvasY === null) {
+    return
+  }
+  
+  // Redimensionner l'objet sélectionné
+  if (fabricDesignerRef.value && fabricDesignerRef.value.resizeSelectedObjectFromHandle) {
+    fabricDesignerRef.value.resizeSelectedObjectFromHandle(
+      resizeData.canvasX,
+      resizeData.canvasY,
+      resizeData.startX,
+      resizeData.startY,
+      resizeData.handleInfo
+    )
+  }
+}
+
+/**
+ * Gère la fin du redimensionnement depuis le modèle 3D
+ */
+const on3DResizeEnd = () => {
+  // Réinitialiser les données de resize dans le canvas
+  if (fabricDesignerRef.value && fabricDesignerRef.value.getCanvas) {
+    const canvas = fabricDesignerRef.value.getCanvas()
+    const activeObject = canvas?.getActiveObject()
+    if (activeObject && fabricDesignerRef.value.resetResizeData) {
+      fabricDesignerRef.value.resetResizeData(activeObject)
+    }
+  }
+  
+  isResizing.value = false
+  resizeStartPos.value = { x: 0, y: 0 }
+  currentResizeHandle.value = null
+  
+  // Désactiver le mode resize dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setResizing) {
+    threeSceneRef.value.setResizing(false, null, null)
+  }
+  
+  // Remettre le curseur normal
+  if (threeSceneRef.value && threeSceneRef.value.renderer) {
+    threeSceneRef.value.renderer.domElement.style.cursor = dragMode.value ? 'grab' : 'default'
+  }
+  
+  console.log('📏 Fin du redimensionnement depuis 3D')
+}
+
+/**
+ * Gère la fin du glissement sur le modèle 3D
+ */
 const on3DDragEnd = () => {
   isDragging.value = false
+  
+  // Réinitialiser le décalage
+  dragOffset.value = { x: 0, y: 0 }
+  dragStartPos.value = { x: 0, y: 0 }
+  
+  // Désactiver le drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragState) {
+    threeSceneRef.value.setDragState(false)
+  }
+  
+  // Remettre le curseur normal
+  if (threeSceneRef.value && threeSceneRef.value.renderer) {
+    threeSceneRef.value.renderer.domElement.style.cursor = dragMode.value ? 'grab' : 'default'
+  }
+  
   console.log('🎯 Fin du drag sur 3D')
 }
 
+/**
+ * Gère le redimensionnement d'un objet avec la molette de la souris
+ * 
+ * Quand l'utilisateur utilise la molette sur le modèle 3D avec un objet sélectionné,
+ * l'objet est redimensionné proportionnellement.
+ * 
+ * @param {Object} scaleData - Données contenant le facteur de redimensionnement
+ */
 const on3DScale = (scaleData) => {
+  // Vérifier qu'un objet est sélectionné (dragMode actif signifie qu'un objet est sélectionné)
   if (!dragMode.value) return
   
-  // Redimensionner l'objet sélectionné
-  if (fabricDesignerRef.value && fabricDesignerRef.value.scaleSelectedObject) {
+  // Vérifier qu'il y a bien un objet sélectionné dans le canvas
+  if (!fabricDesignerRef.value) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas || !canvas.getActiveObject()) {
+    console.warn('⚠️ Aucun objet sélectionné pour le redimensionnement')
+    return
+  }
+  
+  // Redimensionner l'objet sélectionné sur le canvas 2D
+  if (fabricDesignerRef.value.scaleSelectedObject) {
     fabricDesignerRef.value.scaleSelectedObject(scaleData.scaleFactor)
-    console.log('📏 Redimensionnement:', scaleData.scaleFactor)
+    console.log('📏 Redimensionnement depuis 3D:', {
+      scaleFactor: scaleData.scaleFactor,
+      objectType: canvas.getActiveObject()?.type
+    })
   }
 }
 
@@ -492,7 +862,22 @@ const updateTextureRealTime = () => {
   }, 200) // Debounce de 200ms pour laisser le temps au canvas de se rendre
 }
 
+// ===== GESTION DE LA NAVIGATION ENTRE VUES =====
+/**
+ * Bascule entre la vue 2D et la vue 3D
+ * Chaque vue prend 100% de l'écran quand elle est active
+ */
+const toggleView = () => {
+  currentView.value = currentView.value === '3d' ? '2d' : '3d'
+  // Maintenir la compatibilité avec showDesigner
+  showDesigner.value = currentView.value === '2d'
+}
+
 const toggleDesigner = () => {
+  // Si on toggle le designer, on passe en vue 2D
+  if (!showDesigner.value) {
+    currentView.value = '2d'
+  }
   showDesigner.value = !showDesigner.value
 }
 
@@ -586,6 +971,23 @@ const applyDesignToModel = async () => {
   background: #4338ca;
 }
 
+.view-toggle-btn {
+  padding: 8px 16px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+  margin-left: 10px;
+}
+
+.view-toggle-btn:hover {
+  background: #059669;
+}
+
 .apply-btn {
   padding: 8px 16px;
   background: #10b981;
@@ -660,6 +1062,46 @@ const applyDesignToModel = async () => {
   overflow: hidden;
 }
 
+/* ===== VUES EN PLEIN ÉCRAN ===== */
+.view-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+/* Cacher la vue inactive avec v-show */
+/* Note: v-show utilise display: none, donc les éléments restent dans le DOM */
+
+.view-3d {
+  background: #1a1a1a;
+  z-index: 1;
+}
+
+.view-2d {
+  background: white;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.view-2d .panel-header {
+  flex-shrink: 0;
+}
+
+.view-2d .work-zone-controls {
+  flex-shrink: 0;
+}
+
+.view-2d .fabric-designer-container {
+  flex: 1;
+  overflow: auto;
+}
+
+/* Anciens styles pour compatibilité */
 .scene-panel {
   flex: 1;
   position: relative;
@@ -678,6 +1120,7 @@ const applyDesignToModel = async () => {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
+  height: 100%;
 }
 
 .panel-header {

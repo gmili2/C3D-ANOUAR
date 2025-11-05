@@ -1,6 +1,20 @@
+<!-- 
+  FabricDesigner.vue - Composant pour le design 2D avec Fabric.js
+  
+  Ce composant gère :
+  - Le canvas 2D Fabric.js pour créer des designs
+  - L'ajout d'éléments (texte, images, formes)
+  - Le dessin libre avec le pinceau
+  - L'historique undo/redo
+  - La synchronisation avec le modèle 3D via texture partagée
+  - Les zones de travail (exclusion de zones haut/bas)
+  - Le placement d'éléments depuis le modèle 3D
+-->
 <template>
   <div class="fabric-designer-container">
+    <!-- Barre d'outils avec tous les boutons d'action -->
     <div class="designer-toolbar">
+      <!-- Bouton pour ajouter du texte -->
       <button 
         @click="activatePlacementMode('text')" 
         class="toolbar-btn"
@@ -61,55 +75,81 @@
 </template>
 
 <script setup>
+/**
+ * SCRIPT SETUP - Configuration du composant Fabric.js
+ * 
+ * Ce composant gère un canvas 2D interactif avec Fabric.js pour créer
+ * des designs qui seront appliqués comme texture sur le modèle 3D.
+ */
+
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern } from 'fabric'
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
 
-const emit = defineEmits(['design-updated', 'canvas-ready', 'placement-mode-changed', 'object-selected', 'object-deselected', 'move-object'])
+// ===== ÉVÉNEMENTS ÉMIS =====
+const emit = defineEmits([
+  'design-updated',          // Le design a été modifié
+  'canvas-ready',            // Le canvas est prêt
+  'placement-mode-changed',  // Le mode placement a changé
+  'object-selected',         // Un objet a été sélectionné
+  'object-deselected',       // Aucun objet n'est sélectionné
+  'move-object'              // Un objet a été déplacé
+])
 
+// ===== PROPS =====
 const props = defineProps({
   canvasWidth: {
     type: Number,
-    default: 800
+    default: 800  // Largeur du canvas en pixels
   },
   canvasHeight: {
     type: Number,
-    default: 600
+    default: 600  // Hauteur du canvas en pixels
   },
   on3DClick: {
     type: Function,
-    default: null
+    default: null  // Callback pour les clics 3D (déprécié)
   },
   workZoneTop: {
     type: Number,
-    default: 0.1 // 10% par défaut
+    default: 0.1  // 10% par défaut - Zone à exclure du haut
   },
   workZoneBottom: {
     type: Number,
-    default: 0.1 // 10% par défaut
+    default: 0.1  // 10% par défaut - Zone à exclure du bas
   }
 })
 
-const canvasElement = ref(null)
-let canvas = null
-let renderTimeout = null
+// ===== RÉFÉRENCES =====
+const canvasElement = ref(null)      // Référence au canvas HTML
+const canvasContainer = ref(null)    // Référence au conteneur du canvas
+let canvas = null                    // Instance Fabric.js Canvas
+let renderTimeout = null             // Timeout pour debounce les rendus
 
-const isDrawMode = ref(false)
-const drawColor = ref('#000000')
-const drawWidth = ref(5)
-const placementMode = ref(null) // null, 'circle', 'rectangle', 'text', 'image'
+// ===== GESTION DES COPIES POUR WRAP AROUND =====
+// Map pour stocker les copies wrap-around des objets
+// Clé: objet original, Valeur: tableau de copies
+const wrapAroundCopies = new Map()
 
+// ===== ÉTAT DU MODE DE DESSIN =====
+const isDrawMode = ref(false)    // Mode dessin libre actif
+const drawColor = ref('#000000')  // Couleur du pinceau
+const drawWidth = ref(5)          // Largeur du pinceau en pixels
+const placementMode = ref(null)   // Mode placement: null, 'circle', 'rectangle', 'text', 'image'
+
+// ===== DIMENSIONS DU CANVAS =====
 const canvasWidth = props.canvasWidth || 1200
 const canvasHeight = props.canvasHeight || 900
 
-// Store pour la synchronisation avec Three.js
+// ===== STORE POUR LA SYNCHRONISATION =====
+// Store pour signaler les mises à jour de texture à Three.js
 const { requestTextureUpdate } = useCanvasTextureStore()
 
-// Système d'historique pour undo/redo
-let history = []
-let historyIndex = -1
-const maxHistorySize = 50
-let isUndoRedoInProgress = false // Flag pour éviter de sauvegarder pendant undo/redo
+// ===== SYSTÈME D'HISTORIQUE (UNDO/REDO) =====
+let history = []                    // Historique des états du canvas (JSON)
+let historyIndex = -1               // Index actuel dans l'historique
+const maxHistorySize = 50            // Taille maximale de l'historique
+let isUndoRedoInProgress = false    // Flag pour éviter de sauvegarder pendant undo/redo
 
 const canUndo = computed(() => {
   return canvas && historyIndex > 0
@@ -154,6 +194,15 @@ onUnmounted(() => {
     clearTimeout(renderTimeout)
     renderTimeout = null
   }
+  
+  // Nettoyer toutes les copies wrap-around
+  if (wrapAroundCopies) {
+    wrapAroundCopies.forEach((copies, obj) => {
+      removeWrapAroundCopies(obj)
+    })
+    wrapAroundCopies.clear()
+  }
+  
   if (canvas) {
     canvas.dispose()
     canvas = null
@@ -180,6 +229,625 @@ watch([() => props.workZoneTop, () => props.workZoneBottom], () => {
   }
 })
 
+/**
+ * Supprime les copies wrap-around d'un objet
+ * 
+ * @param {fabric.Object} obj - L'objet original (ou une copie)
+ */
+const removeWrapAroundCopies = (obj) => {
+  if (!canvas) return
+  
+  // Si c'est une copie, trouver l'original
+  const original = obj.userData?.isWrapAroundCopy ? obj.userData.originalObject : obj
+  
+  const copies = wrapAroundCopies.get(original)
+  if (copies) {
+    copies.forEach(copy => {
+      canvas.remove(copy)
+    })
+    wrapAroundCopies.delete(original)
+  }
+}
+
+/**
+ * Vérifie si un objet est complètement hors du canvas
+ * 
+ * @param {fabric.Object} obj - L'objet à vérifier
+ * @returns {boolean} - true si l'objet est complètement hors du canvas
+ */
+const isCompletelyOutsideCanvas = (obj) => {
+  if (!obj || !canvas) return false
+  
+  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  const objLeft = obj.left || 0
+  const objTop = obj.top || 0
+  
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  
+  // Vérifier si l'objet est complètement à droite
+  if (objLeft > canvasWidth) return true
+  // Vérifier si l'objet est complètement à gauche
+  if (objLeft + objWidth < 0) return true
+  // Vérifier si l'objet est complètement en bas
+  if (objTop > activeZoneBottom) return true
+  // Vérifier si l'objet est complètement en haut
+  if (objTop + objHeight < activeZoneTop) return true
+  
+  return false
+}
+
+/**
+ * Remplace l'objet original par une copie et met à jour les références
+ * 
+ * @param {fabric.Object} original - L'objet original à remplacer
+ * @param {fabric.Object} copy - La copie qui devient le nouvel original
+ */
+const replaceOriginalWithCopy = (original, copy) => {
+  if (!canvas || !original || !copy) return
+  
+  // Vérifier que la copie existe toujours dans le canvas
+  const objects = canvas.getObjects()
+  if (!objects.includes(copy)) {
+    console.warn('La copie n\'existe pas dans le canvas')
+    return
+  }
+  
+  // Supprimer toutes les autres copies (sauf celle qui devient l'original)
+  const copies = wrapAroundCopies.get(original)
+  if (copies) {
+    copies.forEach(c => {
+      if (c !== copy && objects.includes(c)) {
+        canvas.remove(c)
+      }
+    })
+    wrapAroundCopies.delete(original)
+  }
+  
+  // Supprimer l'original du canvas
+  if (objects.includes(original)) {
+    canvas.remove(original)
+  }
+  
+  // Transformer la copie en original
+  // Nettoyer complètement les userData pour éviter toute confusion
+  copy.set({
+    selectable: true,
+    evented: true,
+    excludeFromExport: false
+  })
+  
+  // Créer un nouvel userData propre sans références à l'ancien original
+  const newUserData = {}
+  if (copy.userData) {
+    // Copier les autres propriétés utiles mais supprimer les références wrap-around
+    Object.keys(copy.userData).forEach(key => {
+      if (key !== 'isWrapAroundCopy' && key !== 'originalObject' && key !== 'wrapDirection') {
+        newUserData[key] = copy.userData[key]
+      }
+    })
+  }
+  copy.userData = newUserData
+  
+  // S'assurer que isWrapAroundCopy est bien false
+  copy.userData.isWrapAroundCopy = false
+  copy.userData.originalObject = null
+  
+  // Mettre à jour la Map pour supprimer toutes les références
+  wrapAroundCopies.delete(original)
+  
+  // Nettoyer toutes les références dans d'autres copies qui pourraient pointer vers l'ancien original
+  wrapAroundCopies.forEach((copiesList, orig) => {
+    copiesList.forEach(c => {
+      if (c.userData?.originalObject === original) {
+        // Cette copie pointait vers l'ancien original, nettoyer
+        c.userData.originalObject = null
+        c.userData.isWrapAroundCopy = false
+        // Supprimer cette copie aussi puisqu'elle n'a plus de sens
+        if (objects.includes(c)) {
+          canvas.remove(c)
+        }
+      }
+    })
+  })
+  
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+}
+
+/**
+ * Synchronise une copie avec son original (lors du déplacement d'une copie)
+ * 
+ * @param {fabric.Object} copy - La copie déplacée
+ */
+const syncCopyWithOriginal = (copy) => {
+  if (!copy || !copy.userData?.isWrapAroundCopy || !copy.userData?.originalObject) return
+  
+  const original = copy.userData.originalObject
+  const wrapDirection = copy.userData.wrapDirection
+  
+  if (!original || !canvas) return
+  
+  // Vérifier que l'original existe toujours dans le canvas
+  // Si l'original a été supprimé (remplacé par la copie), cette copie est maintenant le nouvel original
+  const objects = canvas.getObjects()
+  const originalExists = objects.includes(original)
+  
+  if (!originalExists) {
+    // L'original a été supprimé, cette copie est maintenant le nouvel original
+    // Transformer cette copie en original
+    copy.set({
+      selectable: true,
+      evented: true,
+      excludeFromExport: false
+    })
+    copy.userData = {
+      ...copy.userData,
+      isWrapAroundCopy: false,
+      originalObject: null
+    }
+    // Supprimer cette copie de la Map si elle y était
+    wrapAroundCopies.forEach((copies, orig) => {
+      const index = copies.indexOf(copy)
+      if (index > -1) {
+        copies.splice(index, 1)
+        if (copies.length === 0) {
+          wrapAroundCopies.delete(orig)
+        }
+      }
+    })
+    canvas.renderAll()
+    requestTextureUpdate()
+    return
+  }
+  
+  // Calculer la nouvelle position de l'original basée sur la position de la copie
+  let newOriginalLeft = copy.left
+  let newOriginalTop = copy.top
+  
+  // Ajuster selon la direction du wrap
+  if (wrapDirection === 'horizontal-right') {
+    // La copie est à gauche, donc l'original doit être à droite
+    newOriginalLeft = copy.left + canvasWidth
+  } else if (wrapDirection === 'horizontal-left') {
+    // La copie est à droite, donc l'original doit être à gauche
+    newOriginalLeft = copy.left - canvasWidth
+  }
+  
+  // Pour les directions verticales
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  const zoneHeight = activeZoneBottom - activeZoneTop
+  
+  if (wrapDirection === 'vertical-bottom') {
+    newOriginalTop = copy.top + zoneHeight
+  } else if (wrapDirection === 'vertical-top') {
+    newOriginalTop = copy.top - zoneHeight
+  }
+  
+  // Empêcher la mise en boucle infinie en désactivant temporairement les événements
+  const wasEvented = original.evented
+  original.evented = false
+  
+  // Mettre à jour l'original avec toutes les propriétés de la copie
+  original.set({
+    left: newOriginalLeft,
+    top: newOriginalTop,
+    scaleX: copy.scaleX || original.scaleX,
+    scaleY: copy.scaleY || original.scaleY,
+    angle: copy.angle || original.angle,
+    flipX: copy.flipX || original.flipX,
+    flipY: copy.flipY || original.flipY
+  })
+  original.setCoords()
+  
+  // Réactiver les événements
+  original.evented = wasEvented
+  
+  // Forcer le rendu immédiat
+  canvas.renderAll()
+  requestTextureUpdate()
+  
+  // Vérifier si l'original est maintenant complètement hors du canvas
+  if (isCompletelyOutsideCanvas(original)) {
+    // Remplacer l'original par la copie
+    replaceOriginalWithCopy(original, copy)
+  } else {
+    // Mettre à jour les autres copies si elles existent (sans recréer)
+    syncAllCopiesWithOriginal(original)
+  }
+}
+
+/**
+ * Helper pour créer une copie d'un objet Fabric.js
+ * 
+ * @param {fabric.Object} obj - L'objet original
+ * @returns {Promise<fabric.Object>} - La copie de l'objet
+ */
+const cloneFabricObject = async (obj) => {
+  if (!obj) return null
+  
+  try {
+    // Dans Fabric.js v6, clone() peut retourner une Promise
+    const cloned = await obj.clone()
+    return cloned
+  } catch (error) {
+    // Si clone() échoue ou n'est pas disponible, utiliser toObject/fromObject
+    try {
+      const objData = obj.toObject()
+      const objClass = obj.constructor
+      const cloned = await objClass.fromObject(objData)
+      return cloned
+    } catch (e) {
+      console.error('Erreur lors du clonage:', e)
+      return null
+    }
+  }
+}
+
+/**
+ * Crée des copies wrap-around pour un objet qui dépasse les bords
+ * 
+ * Quand un objet dépasse un bord, une copie complète est créée de l'autre côté
+ * pour montrer la partie qui dépasse. L'objet original reste à sa position.
+ * 
+ * @param {fabric.Object} obj - L'objet original
+ */
+const createWrapAroundCopies = async (obj) => {
+  if (!obj || !canvas || obj.userData?.isWorkZoneIndicator) return
+  
+  // Supprimer les anciennes copies
+  removeWrapAroundCopies(obj)
+  
+  // Obtenir les dimensions de l'objet (avec le scale appliqué)
+  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  
+  const objLeft = obj.left || 0
+  const objTop = obj.top || 0
+  
+  const copies = []
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  
+  // ===== COPIES HORIZONTALES =====
+  // Si l'objet dépasse à droite, créer une copie complète à gauche
+  // La copie montre la partie qui dépasse
+  if (objLeft + objWidth > canvasWidth) {
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft - canvasWidth,
+        top: objTop,
+        selectable: true,  // Permettre la sélection et le déplacement
+        evented: true,      // Permettre les événements
+        excludeFromExport: true
+      })
+      copy.userData = { 
+        isWrapAroundCopy: true, 
+        originalObject: obj,
+        wrapDirection: 'horizontal-right'
+      }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  // Si l'objet dépasse à gauche, créer une copie complète à droite
+  // La copie montre la partie qui dépasse
+  if (objLeft < 0) {
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft + canvasWidth,
+        top: objTop,
+        selectable: true,  // Permettre la sélection et le déplacement
+        evented: true,      // Permettre les événements
+        excludeFromExport: true
+      })
+      copy.userData = { 
+        isWrapAroundCopy: true, 
+        originalObject: obj,
+        wrapDirection: 'horizontal-left'
+      }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  // ===== COPIES VERTICALES (avec zones de travail) =====
+  // Si l'objet dépasse en bas de la zone active, créer une copie en haut
+  if (objTop + objHeight > activeZoneBottom) {
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft,
+        top: objTop - (activeZoneBottom - activeZoneTop),
+        selectable: true,  // Permettre la sélection et le déplacement
+        evented: true,      // Permettre les événements
+        excludeFromExport: true
+      })
+      copy.userData = { 
+        isWrapAroundCopy: true, 
+        originalObject: obj,
+        wrapDirection: 'vertical-bottom'
+      }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  // Si l'objet dépasse en haut de la zone active, créer une copie en bas
+  if (objTop < activeZoneTop) {
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft,
+        top: objTop + (activeZoneBottom - activeZoneTop),
+        selectable: true,  // Permettre la sélection et le déplacement
+        evented: true,      // Permettre les événements
+        excludeFromExport: true
+      })
+      copy.userData = { 
+        isWrapAroundCopy: true, 
+        originalObject: obj,
+        wrapDirection: 'vertical-top'
+      }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  // ===== COPIES DIAGONALES (coins) =====
+  // Si l'objet dépasse en coin (haut-droite, bas-droite, etc.), créer des copies supplémentaires
+  if (objLeft + objWidth > canvasWidth && objTop < activeZoneTop) {
+    // Coin haut-droite : copie en haut-gauche
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft - canvasWidth,
+        top: objTop + (activeZoneBottom - activeZoneTop),
+        selectable: false,
+        evented: false,
+        excludeFromExport: true
+      })
+      copy.userData = { isWrapAroundCopy: true, originalObject: obj }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  if (objLeft + objWidth > canvasWidth && objTop + objHeight > activeZoneBottom) {
+    // Coin bas-droite : copie en bas-gauche
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft - canvasWidth,
+        top: objTop - (activeZoneBottom - activeZoneTop),
+        selectable: false,
+        evented: false,
+        excludeFromExport: true
+      })
+      copy.userData = { isWrapAroundCopy: true, originalObject: obj }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  if (objLeft < 0 && objTop < activeZoneTop) {
+    // Coin haut-gauche : copie en haut-droite
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft + canvasWidth,
+        top: objTop + (activeZoneBottom - activeZoneTop),
+        selectable: false,
+        evented: false,
+        excludeFromExport: true
+      })
+      copy.userData = { isWrapAroundCopy: true, originalObject: obj }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  if (objLeft < 0 && objTop + objHeight > activeZoneBottom) {
+    // Coin bas-gauche : copie en bas-droite
+    const copy = await cloneFabricObject(obj)
+    if (copy) {
+      copy.set({
+        left: objLeft + canvasWidth,
+        top: objTop - (activeZoneBottom - activeZoneTop),
+        selectable: false,
+        evented: false,
+        excludeFromExport: true
+      })
+      copy.userData = { isWrapAroundCopy: true, originalObject: obj }
+      canvas.add(copy)
+      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
+      try {
+        if (canvas.sendObjectToBack) {
+          canvas.sendObjectToBack(copy)
+        }
+      } catch (e) {
+        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
+      }
+      copies.push(copy)
+    }
+  }
+  
+  // Stocker les copies
+  if (copies.length > 0) {
+    wrapAroundCopies.set(obj, copies)
+  }
+}
+
+/**
+ * Synchronise toutes les copies avec leur original
+ * Appelé quand l'original est modifié (position, taille, etc.)
+ * 
+ * @param {fabric.Object} original - L'objet original
+ */
+const syncAllCopiesWithOriginal = (original) => {
+  if (!original || !canvas) return
+  
+  const copies = wrapAroundCopies.get(original)
+  if (!copies || copies.length === 0) return
+  
+  const objWidth = (original.width || (original.radius ? original.radius * 2 : 50)) * (original.scaleX || 1)
+  const objHeight = (original.height || (original.radius ? original.radius * 2 : 50)) * (original.scaleY || 1)
+  const objLeft = original.left || 0
+  const objTop = original.top || 0
+  
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  const zoneHeight = activeZoneBottom - activeZoneTop
+  
+  // Mettre à jour chaque copie selon sa direction
+  copies.forEach(copy => {
+    if (!copy || !copy.userData) return
+    
+    const wrapDirection = copy.userData.wrapDirection
+    let newLeft = objLeft
+    let newTop = objTop
+    
+    // Calculer la nouvelle position selon la direction
+    if (wrapDirection === 'horizontal-right') {
+      newLeft = objLeft - canvasWidth
+    } else if (wrapDirection === 'horizontal-left') {
+      newLeft = objLeft + canvasWidth
+    } else if (wrapDirection === 'vertical-bottom') {
+      newTop = objTop - zoneHeight
+    } else if (wrapDirection === 'vertical-top') {
+      newTop = objTop + zoneHeight
+    }
+    
+    // Mettre à jour la copie (sans déclencher les événements)
+    copy.set({
+      left: newLeft,
+      top: newTop,
+      scaleX: original.scaleX,
+      scaleY: original.scaleY,
+      angle: original.angle,
+      flipX: original.flipX,
+      flipY: original.flipY
+    })
+    copy.setCoords()
+  })
+}
+
+/**
+ * Applique l'effet wrap around à un objet
+ * 
+ * Quand l'objet dépasse un bord, des copies visuelles apparaissent de l'autre côté
+ * pour montrer la partie qui dépasse. L'objet original reste à sa position.
+ * 
+ * @param {fabric.Object} obj - L'objet Fabric.js à ajuster
+ */
+const applyWrapAround = async (obj) => {
+  if (!obj || !canvas || obj.userData?.isWorkZoneIndicator || obj.userData?.isWrapAroundCopy) return
+  
+  // Obtenir les dimensions de l'objet (avec le scale appliqué)
+  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  
+  const objLeft = obj.left || 0
+  const objTop = obj.top || 0
+  
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  
+  // Vérifier si l'objet dépasse les bords
+  const exceedsRight = objLeft + objWidth > canvasWidth
+  const exceedsLeft = objLeft < 0
+  const exceedsBottom = objTop + objHeight > activeZoneBottom
+  const exceedsTop = objTop < activeZoneTop
+  
+  // Si l'objet dépasse, créer ou mettre à jour les copies
+  if (exceedsRight || exceedsLeft || exceedsBottom || exceedsTop) {
+    // Vérifier si des copies existent déjà
+    const existingCopies = wrapAroundCopies.get(obj)
+    if (existingCopies && existingCopies.length > 0) {
+      // Mettre à jour les copies existantes
+      syncAllCopiesWithOriginal(obj)
+    } else {
+      // Créer de nouvelles copies
+      await createWrapAroundCopies(obj)
+    }
+  } else {
+    // Si l'objet ne dépasse plus, supprimer les copies
+    removeWrapAroundCopies(obj)
+  }
+}
+
 const initCanvas = () => {
   if (!canvasElement.value) return
 
@@ -190,12 +858,52 @@ const initCanvas = () => {
       backgroundColor: '#ffffff', // Fond blanc pour mieux voir les objets
       selection: true, // Permettre la sélection d'objets
       moveCursor: 'move', // Curseur de déplacement
-      defaultCursor: 'default' // Curseur par défaut
+      defaultCursor: 'default', // Curseur par défaut
+      // Configuration des contrôles de redimensionnement
+      uniformScaling: false, // Permettre le redimensionnement non-uniforme (largeur/hauteur séparées)
+      centeredScaling: false, // Utiliser le coin comme point de référence (comportement standard)
+      centeredRotation: false, // Rotation depuis le centre
+      // Activer tous les contrôles de transformation
+      controlsAboveOverlay: false // Les contrôles sont au-dessus des objets
     })
     
     // Activer le déplacement et la sélection
     canvas.selection = true
     canvas.allowTouchScrolling = false
+    
+    // Fonction helper pour activer les contrôles de redimensionnement
+    const enableScalingControls = (obj) => {
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        // Activer tous les contrôles de redimensionnement et transformation
+        obj.setControlsVisibility({
+          mt: true, // Top (milieu haut)
+          mb: true, // Bottom (milieu bas)
+          ml: true, // Left (milieu gauche)
+          mr: true, // Right (milieu droite)
+          tl: true, // Top-left (coin haut-gauche)
+          tr: true, // Top-right (coin haut-droite)
+          bl: true, // Bottom-left (coin bas-gauche)
+          br: true, // Bottom-right (coin bas-droite)
+          mtr: true // Rotation (top-center pour rotation)
+        })
+      }
+    }
+    
+    // Configurer les contrôles de redimensionnement pour tous les objets ajoutés
+    // Cela permet d'avoir des handles de redimensionnement visibles et fonctionnels
+    canvas.on('object:added', (e) => {
+      const obj = e.target
+      enableScalingControls(obj)
+      
+      // S'assurer que l'objet est sélectionnable et transformable
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        obj.selectable = true
+        obj.evented = true
+      }
+    })
+    
+    // S'assurer que les objets existants ont aussi les contrôles activés lors de la sélection
+    // (Note: Ces événements sont aussi gérés plus bas pour emit, on les configure ici pour les contrôles)
     
     // Forcer la visibilité du canvas
     if (canvasElement.value) {
@@ -246,6 +954,9 @@ const initCanvas = () => {
     canvas.on('selection:created', (e) => {
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Activer les contrôles de redimensionnement pour l'objet sélectionné
+        enableScalingControls(activeObject)
+        
         emit('object-selected', { 
           object: activeObject,
           type: activeObject.type 
@@ -256,6 +967,9 @@ const initCanvas = () => {
     canvas.on('selection:updated', (e) => {
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Activer les contrôles de redimensionnement pour l'objet sélectionné
+        enableScalingControls(activeObject)
+        
         emit('object-selected', { 
           object: activeObject,
           type: activeObject.type 
@@ -280,19 +994,99 @@ const initCanvas = () => {
       // Ne pas sauvegarder pendant la modification, seulement après
       signalChange()
     })
-    canvas.on('object:removed', () => {
+    canvas.on('object:removed', (e) => {
+      const obj = e.target
+      // Supprimer les copies wrap-around si l'objet original est supprimé
+      if (obj && !obj.userData?.isWrapAroundCopy) {
+        removeWrapAroundCopies(obj)
+      }
       saveHistory()
       signalChange()
     })
-    canvas.on('object:moving', () => {
+    canvas.on('object:moving', async (e) => {
+      // Appliquer l'effet wrap around pendant le déplacement avec la souris
+      const obj = e.target
+      
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        if (obj.userData?.isWrapAroundCopy) {
+          // Si c'est une copie qui bouge, synchroniser avec l'original
+          syncCopyWithOriginal(obj)
+        } else {
+          // Si c'est l'original qui bouge, mettre à jour les copies
+          await applyWrapAround(obj)
+        }
+      }
+      
       // Pendant le déplacement, mettre à jour fréquemment
       canvas.renderAll()
       requestTextureUpdate()
     })
-    canvas.on('object:moved', () => {
+    canvas.on('object:moved', async (e) => {
+      const obj = e.target
+      
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        // Vérifier si l'objet existe toujours dans le canvas (pas supprimé)
+        const objects = canvas.getObjects()
+        if (!objects.includes(obj)) {
+          // L'objet a été supprimé, ne rien faire
+          return
+        }
+        
+        if (obj.userData?.isWrapAroundCopy) {
+          // Si c'est une copie qui a été déplacée, synchroniser avec l'original
+          syncCopyWithOriginal(obj)
+        } else {
+          // Si c'est l'original qui a été déplacé, mettre à jour les copies
+          await applyWrapAround(obj)
+          
+          // Vérifier si l'objet original est maintenant complètement hors du canvas
+          if (isCompletelyOutsideCanvas(obj)) {
+            // Trouver une copie pour la remplacer
+            const copies = wrapAroundCopies.get(obj)
+            if (copies && copies.length > 0) {
+              // Utiliser la première copie disponible
+              replaceOriginalWithCopy(obj, copies[0])
+              // Ne pas continuer car l'objet original a été remplacé
+              saveHistory()
+              signalChange()
+              return
+            }
+          }
+        }
+      }
+      
       saveHistory()
       signalChange()
     })
+    // Événement pendant le redimensionnement (scaling en cours)
+    canvas.on('object:scaling', async (e) => {
+      const obj = e.target
+      // Mettre à jour les copies wrap-around si elles existent
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        if (obj.userData?.isWrapAroundCopy) {
+          // Si c'est une copie qui est redimensionnée, synchroniser avec l'original
+          const original = obj.userData?.originalObject
+          if (original) {
+            // Appliquer le même scale à l'original
+            original.set({
+              scaleX: obj.scaleX,
+              scaleY: obj.scaleY
+            })
+            original.setCoords()
+            syncAllCopiesWithOriginal(original)
+          }
+        } else {
+          // Si c'est l'original, mettre à jour toutes les copies
+          syncAllCopiesWithOriginal(obj)
+          await applyWrapAround(obj)
+        }
+      }
+      // Pendant le redimensionnement, mettre à jour en temps réel
+      canvas.renderAll()
+      requestTextureUpdate()
+      emit('design-updated', canvas)
+    })
+    // Événement après le redimensionnement (scaling terminé)
     canvas.on('object:scaled', () => {
       saveHistory()
       signalChange()
@@ -1018,7 +1812,278 @@ const placeImageAt = async (x, y) => {
 }
 
 /**
- * Déplace un objet sélectionné à une nouvelle position
+ * Trouve l'objet Fabric.js à une position donnée sur le canvas
+ * 
+ * @param {number} x - Position X sur le canvas
+ * @param {number} y - Position Y sur le canvas
+ * @returns {fabric.Object|null} - L'objet trouvé ou null
+ */
+const findObjectAtPosition = (x, y) => {
+  if (!canvas) return null
+  
+  // Obtenir tous les objets (sauf les indicateurs de zone de travail)
+  const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+  
+  // Parcourir les objets de haut en bas (les derniers ajoutés sont en premier)
+  // et trouver celui qui contient le point
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i]
+    
+    // Vérifier si le point est dans les limites de l'objet
+    const objLeft = obj.left || 0
+    const objTop = obj.top || 0
+    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    
+    // Vérifier si le point est dans les limites de l'objet
+    if (x >= objLeft && x <= objLeft + objWidth &&
+        y >= objTop && y <= objTop + objHeight) {
+      // Vérifier si l'objet est visible et sélectionnable
+      if (obj.visible && (obj.selectable !== false || obj.evented !== false)) {
+        return obj
+      }
+    }
+  }
+  
+  return null
+}
+
+/**
+ * Détecte si un point est près d'un bord ou coin d'un objet pour le redimensionnement
+ * 
+ * @param {fabric.Object} obj - L'objet à vérifier
+ * @param {number} x - Position X du point
+ * @param {number} y - Position Y du point
+ * @param {number} threshold - Distance de tolérance en pixels (défaut: 10)
+ * @returns {Object|null} - { edge: 'top'|'bottom'|'left'|'right'|'corner', corner: 'tl'|'tr'|'bl'|'br'|null } ou null
+ */
+const detectResizeHandle = (obj, x, y, threshold = 10) => {
+  if (!obj) return null
+  
+  const objLeft = obj.left || 0
+  const objTop = obj.top || 0
+  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  const objRight = objLeft + objWidth
+  const objBottom = objTop + objHeight
+  
+  // Vérifier les coins en premier (priorité)
+  const cornerThreshold = threshold * 1.5 // Un peu plus large pour les coins
+  
+  // Coin haut-gauche (top-left)
+  if (Math.abs(x - objLeft) < cornerThreshold && Math.abs(y - objTop) < cornerThreshold) {
+    return { edge: 'corner', corner: 'tl', handle: 'tl' }
+  }
+  // Coin haut-droite (top-right)
+  if (Math.abs(x - objRight) < cornerThreshold && Math.abs(y - objTop) < cornerThreshold) {
+    return { edge: 'corner', corner: 'tr', handle: 'tr' }
+  }
+  // Coin bas-gauche (bottom-left)
+  if (Math.abs(x - objLeft) < cornerThreshold && Math.abs(y - objBottom) < cornerThreshold) {
+    return { edge: 'corner', corner: 'bl', handle: 'bl' }
+  }
+  // Coin bas-droite (bottom-right)
+  if (Math.abs(x - objRight) < cornerThreshold && Math.abs(y - objBottom) < cornerThreshold) {
+    return { edge: 'corner', corner: 'br', handle: 'br' }
+  }
+  
+  // Vérifier les bords
+  // Bord gauche
+  if (Math.abs(x - objLeft) < threshold && y >= objTop && y <= objBottom) {
+    return { edge: 'left', corner: null, handle: 'ml' }
+  }
+  // Bord droit
+  if (Math.abs(x - objRight) < threshold && y >= objTop && y <= objBottom) {
+    return { edge: 'right', corner: null, handle: 'mr' }
+  }
+  // Bord haut
+  if (Math.abs(y - objTop) < threshold && x >= objLeft && x <= objRight) {
+    return { edge: 'top', corner: null, handle: 'mt' }
+  }
+  // Bord bas
+  if (Math.abs(y - objBottom) < threshold && x >= objLeft && x <= objRight) {
+    return { edge: 'bottom', corner: null, handle: 'mb' }
+  }
+  
+  return null
+}
+
+/**
+ * Sélectionne un objet à une position donnée sur le canvas
+ * 
+ * @param {number} x - Position X sur le canvas
+ * @param {number} y - Position Y sur le canvas
+ * @returns {boolean} - true si un objet a été sélectionné
+ */
+const selectObjectAtPosition = (x, y) => {
+  if (!canvas) return false
+  
+  const obj = findObjectAtPosition(x, y)
+  
+  if (obj) {
+    // Si c'est une copie wrap-around, sélectionner l'original à la place
+    const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
+      ? obj.userData.originalObject 
+      : obj
+    
+    canvas.setActiveObject(targetObject)
+    canvas.renderAll()
+    
+    // Émettre l'événement de sélection
+    emit('object-selected', {
+      object: targetObject,
+      type: targetObject.type
+    })
+    
+    return true
+  }
+  
+  // Si aucun objet n'a été trouvé, désélectionner
+  canvas.discardActiveObject()
+  canvas.renderAll()
+  emit('object-deselected')
+  
+  return false
+}
+
+/**
+ * Redimensionne un objet sélectionné en tirant depuis un bord ou coin
+ * 
+ * @param {number} x - Position X actuelle du curseur
+ * @param {number} y - Position Y actuelle du curseur
+ * @param {number} startX - Position X de départ du drag
+ * @param {number} startY - Position Y de départ du drag
+ * @param {Object} handleInfo - Informations sur le handle (bord/coin)
+ */
+const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) => {
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  if (!activeObject || activeObject.userData?.isWorkZoneIndicator) {
+    return
+  }
+  
+  // Obtenir les dimensions originales de l'objet (sans scale)
+  const originalWidth = activeObject.width || (activeObject.radius ? activeObject.radius * 2 : 50)
+  const originalHeight = activeObject.height || (activeObject.radius ? activeObject.radius * 2 : 50)
+  
+  // S'assurer que userData existe
+  if (!activeObject.userData) {
+    activeObject.userData = {}
+  }
+  
+  // Stocker le scale et position initiale au début du resize (si pas déjà fait)
+  if (!activeObject.userData.initialScaleOnResize) {
+    activeObject.userData.initialScaleOnResize = {
+      scaleX: activeObject.scaleX || 1,
+      scaleY: activeObject.scaleY || 1,
+      left: activeObject.left || 0,
+      top: activeObject.top || 0
+    }
+  }
+  
+  const initialScale = activeObject.userData.initialScaleOnResize
+  const initialWidth = originalWidth * initialScale.scaleX
+  const initialHeight = originalHeight * initialScale.scaleY
+  
+  // Calculer les différences de position depuis le début du resize
+  const deltaX = x - startX
+  const deltaY = y - startY
+  
+  let newScaleX = initialScale.scaleX
+  let newScaleY = initialScale.scaleY
+  let newLeft = initialScale.left
+  let newTop = initialScale.top
+  
+  // Calculer le nouveau scale et position selon le handle
+  if (handleInfo.corner) {
+    // Redimensionnement par coin (scale proportionnel)
+    if (handleInfo.corner === 'br') {
+      // Coin bas-droite : scale depuis le coin haut-gauche
+      newScaleX = (initialWidth + deltaX) / originalWidth
+      newScaleY = (initialHeight + deltaY) / originalHeight
+    } else if (handleInfo.corner === 'tl') {
+      // Coin haut-gauche : scale depuis le coin bas-droite
+      newScaleX = (initialWidth - deltaX) / originalWidth
+      newScaleY = (initialHeight - deltaY) / originalHeight
+      newLeft = initialScale.left + deltaX
+      newTop = initialScale.top + deltaY
+    } else if (handleInfo.corner === 'tr') {
+      // Coin haut-droite : scale depuis le coin bas-gauche
+      newScaleX = (initialWidth + deltaX) / originalWidth
+      newScaleY = (initialHeight - deltaY) / originalHeight
+      newTop = initialScale.top + deltaY
+    } else if (handleInfo.corner === 'bl') {
+      // Coin bas-gauche : scale depuis le coin haut-droite
+      newScaleX = (initialWidth - deltaX) / originalWidth
+      newScaleY = (initialHeight + deltaY) / originalHeight
+      newLeft = initialScale.left + deltaX
+    }
+  } else {
+    // Redimensionnement par bord (scale dans une direction)
+    if (handleInfo.edge === 'right') {
+      newScaleX = (initialWidth + deltaX) / originalWidth
+      // Garder la position et le scale Y inchangés
+    } else if (handleInfo.edge === 'left') {
+      newScaleX = (initialWidth - deltaX) / originalWidth
+      newLeft = initialScale.left + deltaX
+    } else if (handleInfo.edge === 'bottom') {
+      newScaleY = (initialHeight + deltaY) / originalHeight
+      // Garder la position et le scale X inchangés
+    } else if (handleInfo.edge === 'top') {
+      newScaleY = (initialHeight - deltaY) / originalHeight
+      newTop = initialScale.top + deltaY
+    }
+  }
+  
+  // Limiter le scale (entre 0.1 et 10)
+  newScaleX = Math.max(0.1, Math.min(10, newScaleX))
+  newScaleY = Math.max(0.1, Math.min(10, newScaleY))
+  
+  // Appliquer les transformations
+  activeObject.set({
+    scaleX: newScaleX,
+    scaleY: newScaleY,
+    left: newLeft,
+    top: newTop
+  })
+  
+  // Pour les cercles, ajuster aussi le radius
+  if (activeObject.type === 'circle' && activeObject.radius) {
+    const originalRadius = activeObject.radius / (activeObject.scaleX || 1)
+    activeObject.set('radius', originalRadius * newScaleX)
+  }
+  
+  activeObject.setCoords()
+  
+  // Mettre à jour les copies wrap-around si elles existent
+  await applyWrapAround(activeObject)
+  
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+}
+
+/**
+ * Réinitialise les données de redimensionnement (appelé à la fin du resize)
+ * 
+ * @param {fabric.Object} obj - L'objet qui a été redimensionné
+ */
+const resetResizeData = (obj) => {
+  if (obj && obj.userData && obj.userData.initialScaleOnResize) {
+    delete obj.userData.initialScaleOnResize
+  }
+}
+
+/**
+ * Déplace un objet sélectionné à une nouvelle position avec effet "wrap around"
+ * 
+ * Quand l'objet atteint les bords du canvas, il réapparaît de l'autre côté
+ * (comme si le canvas était torique). Cela permet de créer des textures
+ * qui se répètent de manière fluide.
+ * 
+ * @param {number} x - Position X cible (peut être en dehors du canvas)
+ * @param {number} y - Position Y cible (peut être en dehors du canvas)
  */
 const moveSelectedObject = (x, y) => {
   if (!canvas) return
@@ -1028,58 +2093,119 @@ const moveSelectedObject = (x, y) => {
     return
   }
   
-  // Vérifier que la position est dans la zone active
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
-  const activeZoneTop = topHeight
-  const activeZoneBottom = canvasHeight - bottomHeight
+  // Les coordonnées x, y sont déjà calculées avec le décalage dans DesignStudio
+  // On les utilise directement comme position du coin haut-gauche de l'objet
+  // Mais on doit tenir compte de l'origine de l'objet Fabric.js
   
-  // Ajuster y pour qu'il soit dans la zone active
-  const adjustedY = Math.max(activeZoneTop, Math.min(activeZoneBottom, y))
-  
-  // Obtenir les dimensions de l'objet
-  const objWidth = activeObject.width || (activeObject.radius ? activeObject.radius * 2 : 50)
-  const objHeight = activeObject.height || (activeObject.radius ? activeObject.radius * 2 : 50)
+  // Obtenir les dimensions de l'objet (avec le scale appliqué)
+  const objWidth = (activeObject.width || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleX || 1)
+  const objHeight = (activeObject.height || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleY || 1)
   
   // Obtenir l'origine de l'objet (par défaut 'left' et 'top' pour Fabric.js)
   const originX = activeObject.originX || 'left'
   const originY = activeObject.originY || 'top'
   
-  // Calculer la position selon l'origine
+  // x et y sont les coordonnées du coin haut-gauche de l'objet
+  // On doit les convertir selon l'origine de Fabric.js
   let newLeft = x
-  let newTop = adjustedY
+  let newTop = y
   
+  // Ajuster selon l'origine de l'objet
   if (originX === 'center') {
-    newLeft = x - objWidth / 2
+    newLeft = x + objWidth / 2
   } else if (originX === 'right') {
-    newLeft = x - objWidth
+    newLeft = x + objWidth
   }
+  // Si originX === 'left', on garde x tel quel
   
   if (originY === 'center') {
-    newTop = adjustedY - objHeight / 2
+    newTop = y + objHeight / 2
   } else if (originY === 'bottom') {
-    newTop = adjustedY - objHeight
+    newTop = y + objHeight
   }
+  // Si originY === 'top', on garde y tel quel
   
-  activeObject.set({
-    left: newLeft,
-    top: newTop
-  })
-  
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
+  // Vérifier si c'est une copie wrap-around qui est déplacée
+  if (activeObject.userData?.isWrapAroundCopy) {
+    // Si c'est une copie, déplacer la copie et synchroniser avec l'original
+    activeObject.set({
+      left: newLeft,
+      top: newTop
+    })
+    activeObject.setCoords()
+    
+    // Synchroniser avec l'original
+    syncCopyWithOriginal(activeObject)
+    
+    canvas.renderAll()
+    requestTextureUpdate()
+    emit('design-updated', canvas)
+  } else {
+    // Si c'est l'original, déplacer normalement
+    activeObject.set({
+      left: newLeft,
+      top: newTop
+    })
+    
+    // Appliquer l'effet wrap around (créera des copies si nécessaire)
+    // Note: applyWrapAround est async, mais on ne peut pas await ici car la fonction n'est pas async
+    // Les copies seront créées de manière asynchrone
+    applyWrapAround(activeObject).then(() => {
+      // Mettre à jour les coordonnées pour le rendu
+      activeObject.setCoords()
+      canvas.renderAll()
+      requestTextureUpdate()
+      emit('design-updated', canvas)
+    }).catch(() => {
+      // En cas d'erreur, mettre à jour quand même
+      activeObject.setCoords()
+      canvas.renderAll()
+      requestTextureUpdate()
+      emit('design-updated', canvas)
+    })
+  }
 }
 
 /**
  * Redimensionne un objet sélectionné avec un facteur de scale
  * @param {number} scaleFactor - Facteur de redimensionnement (1.0 = taille originale, >1 = agrandir, <1 = rétrécir)
  */
-const scaleSelectedObject = (scaleFactor) => {
+const scaleSelectedObject = async (scaleFactor) => {
   if (!canvas) return
   
   const activeObject = canvas.getActiveObject()
   if (!activeObject || activeObject.userData?.isWorkZoneIndicator) {
+    return
+  }
+  
+  // Vérifier si c'est une copie wrap-around qui est redimensionnée
+  if (activeObject.userData?.isWrapAroundCopy) {
+    // Si c'est une copie, redimensionner la copie et synchroniser avec l'original
+    const currentScaleX = activeObject.scaleX || 1
+    const currentScaleY = activeObject.scaleY || 1
+    const newScaleX = currentScaleX * scaleFactor
+    const newScaleY = currentScaleY * scaleFactor
+    
+    activeObject.set({
+      scaleX: newScaleX,
+      scaleY: newScaleY
+    })
+    activeObject.setCoords()
+    
+    // Synchroniser avec l'original
+    const original = activeObject.userData?.originalObject
+    if (original) {
+      original.set({
+        scaleX: newScaleX,
+        scaleY: newScaleY
+      })
+      original.setCoords()
+      syncAllCopiesWithOriginal(original)
+    }
+    
+    canvas.renderAll()
+    requestTextureUpdate()
+    emit('design-updated', canvas)
     return
   }
   
@@ -1105,9 +2231,10 @@ const scaleSelectedObject = (scaleFactor) => {
     scaleY: clampedScaleY
   })
   
-  // Pour les cercles, ajuster aussi le radius
+  // Pour les cercles, ajuster aussi le radius proportionnellement au scale
   if (activeObject.type === 'circle' && activeObject.radius) {
-    activeObject.set('radius', activeObject.radius * scaleFactor)
+    const originalRadius = activeObject.radius / (activeObject.scaleX || 1)
+    activeObject.set('radius', originalRadius * clampedScaleX)
   }
   
   // Recalculer la position pour maintenir le centre
@@ -1119,6 +2246,10 @@ const scaleSelectedObject = (scaleFactor) => {
   })
   
   activeObject.setCoords()
+  
+  // Mettre à jour les copies wrap-around si elles existent
+  await applyWrapAround(activeObject)
+  
   canvas.renderAll()
   requestTextureUpdate()
   emit('design-updated', canvas)
@@ -1134,6 +2265,11 @@ defineExpose({
   activatePlacementMode,
   moveSelectedObject,
   scaleSelectedObject,
+  selectObjectAtPosition,
+  findObjectAtPosition,
+  detectResizeHandle,
+  resizeSelectedObjectFromHandle,
+  resetResizeData,
   undo,
   redo,
   deleteSelected

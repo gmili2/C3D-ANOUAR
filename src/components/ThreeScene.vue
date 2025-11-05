@@ -335,21 +335,23 @@ const setupClickHandler = () => {
   }
   
   const onMouseMove = (event) => {
+    // Toujours calculer les coordonnées une seule fois
+    const canvasCoords = getCanvasCoords(event)
+    
+    // Toujours émettre l'événement hover pour détecter les bords et changer le curseur
+    if (canvasCoords !== null) {
+      emit('3d-hover', {
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y
+      })
+    }
+    
     if (!props.dragMode) {
-      // Même sans drag actif, vérifier si on survole un bord pour changer le curseur
-      const canvasCoords = getCanvasCoords(event)
-      if (canvasCoords !== null) {
-        emit('3d-hover', {
-          canvasX: canvasCoords.x,
-          canvasY: canvasCoords.y
-        })
-      }
       return
     }
     
     // Si on est en train de cliquer/maintenir (isDragging3D ou isResizing3D)
     if (isDragging3D || isResizing3D) {
-      const canvasCoords = getCanvasCoords(event)
       if (canvasCoords !== null) {
         if (isResizing3D && resizeStartPosition && resizeHandleInfo) {
           // Mode redimensionnement
@@ -388,9 +390,10 @@ const setupClickHandler = () => {
       
       lastDragPosition = null
       
-      // Remettre le curseur normal
+      // Remettre le curseur normal (move pour déplacement)
       if (renderer && renderer.domElement) {
-        renderer.domElement.style.cursor = props.dragMode ? 'grab' : 'default'
+        const defaultCursor = props.dragMode ? 'move' : 'default'
+        renderer.domElement.style.setProperty('cursor', defaultCursor, 'important')
       }
       
       // Réactiver les contrôles OrbitControls
@@ -1178,10 +1181,10 @@ const setPlacementMode = (active, type) => {
 const setDragMode = (active) => {
   if (renderer && renderer.domElement) {
     if (active) {
-      renderer.domElement.style.cursor = 'grab'
+      renderer.domElement.style.setProperty('cursor', 'move', 'important')
       console.log('🎯 Mode drag activé - Sélectionnez un objet sur le canvas 2D puis glissez-le sur le modèle 3D')
     } else {
-      renderer.domElement.style.cursor = 'default'
+      renderer.domElement.style.setProperty('cursor', 'default', 'important')
       console.log('Mode drag désactivé')
     }
   }
@@ -1203,7 +1206,7 @@ const setResizing = (resizing, startPos, handleInfo) => {
     isDragging3D = true
     // Changer le curseur
     if (renderer && renderer.domElement) {
-      renderer.domElement.style.cursor = 'grabbing'
+      renderer.domElement.style.setProperty('cursor', 'move', 'important')
     }
   } else {
     resizeStartPosition = null
@@ -1221,7 +1224,7 @@ const setDragState = (dragging) => {
   if (dragging) {
     // Changer le curseur
     if (renderer && renderer.domElement) {
-      renderer.domElement.style.cursor = 'grabbing'
+      renderer.domElement.style.setProperty('cursor', 'move', 'important')
     }
   }
 }

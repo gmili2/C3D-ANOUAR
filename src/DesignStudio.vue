@@ -634,20 +634,38 @@ const on3DDrag = (clickData) => {
   }
 }
 
+// Variable pour stocker le handle survolé actuellement
+const currentHoveredHandle = ref(null)
+
 /**
  * Gère le survol du modèle 3D pour détecter les bords de redimensionnement
  * 
  * @param {Object} hoverData - Données contenant canvasX, canvasY
  */
 const on3DHover = (hoverData) => {
-  if (!dragMode.value || !fabricDesignerRef.value) return
+  if (!fabricDesignerRef.value) return
   
   const canvas = fabricDesignerRef.value.getCanvas()
   const activeObject = canvas?.getActiveObject()
   
-  if (!activeObject) return
+  // Si aucun objet n'est sélectionné ou si dragMode n'est pas actif, réinitialiser
+  if (!activeObject || !dragMode.value) {
+    // Réinitialiser le style
+    if (fabricDesignerRef.value.resetResizeHover) {
+      fabricDesignerRef.value.resetResizeHover()
+    }
+    currentHoveredHandle.value = null
+    
+      // Remettre le curseur par défaut (move pour déplacement)
+      if (threeSceneRef.value && threeSceneRef.value.renderer) {
+        const element = threeSceneRef.value.renderer.domElement
+        const defaultCursor = dragMode.value ? 'move' : 'default'
+        element.style.setProperty('cursor', defaultCursor, 'important')
+      }
+    return
+  }
   
-  // Vérifier si on est près d'un bord pour changer le curseur
+  // Vérifier si on est près d'un bord pour changer le curseur et le style
   if (fabricDesignerRef.value.detectResizeHandle) {
     const handleInfo = fabricDesignerRef.value.detectResizeHandle(
       activeObject,
@@ -655,25 +673,78 @@ const on3DHover = (hoverData) => {
       hoverData.canvasY
     )
     
-    if (handleInfo && threeSceneRef.value && threeSceneRef.value.renderer) {
-      // Changer le curseur selon le type de handle
-      let cursor = 'grab'
-      if (handleInfo.corner) {
-        // Curseur diagonal pour les coins
-        if (handleInfo.corner === 'tl' || handleInfo.corner === 'br') {
-          cursor = 'nwse-resize'
-        } else {
-          cursor = 'nesw-resize'
+    if (handleInfo) {
+      // Si c'est un nouveau handle, mettre à jour le style
+      if (!currentHoveredHandle.value || 
+          currentHoveredHandle.value.handle !== handleInfo.handle) {
+        currentHoveredHandle.value = handleInfo
+        
+        // Mettre en évidence le handle
+        if (fabricDesignerRef.value.highlightResizeHandle) {
+          fabricDesignerRef.value.highlightResizeHandle(activeObject, handleInfo)
         }
-      } else if (handleInfo.edge === 'left' || handleInfo.edge === 'right') {
-        cursor = 'ew-resize'
-      } else if (handleInfo.edge === 'top' || handleInfo.edge === 'bottom') {
-        cursor = 'ns-resize'
       }
       
-      threeSceneRef.value.renderer.domElement.style.cursor = cursor
-    } else if (threeSceneRef.value && threeSceneRef.value.renderer) {
-      threeSceneRef.value.renderer.domElement.style.cursor = 'grab'
+      // Changer le curseur selon le type de handle
+      if (threeSceneRef.value && threeSceneRef.value.renderer) {
+        let cursor = 'move' // Par défaut, curseur de déplacement
+        
+        if (handleInfo.corner) {
+          // Curseur diagonal pour les coins
+          // tl (top-left) = nw-resize (nord-ouest)
+          // tr (top-right) = ne-resize (nord-est)
+          // bl (bottom-left) = nesw-resize (sud-ouest, mais on utilise nwse pour l'inverse)
+          // br (bottom-right) = se-resize (sud-est, mais on utilise nwse pour l'inverse)
+          if (handleInfo.corner === 'tl') {
+            cursor = 'nw-resize' // Nord-ouest
+          } else if (handleInfo.corner === 'tr') {
+            cursor = 'ne-resize' // Nord-est
+          } else if (handleInfo.corner === 'bl') {
+            cursor = 'nesw-resize' // Sud-ouest (diagonale /)
+          } else if (handleInfo.corner === 'br') {
+            cursor = 'nwse-resize' // Sud-est (diagonale \)
+          }
+        } else if (handleInfo.edge) {
+          // Curseur pour les bords
+          if (handleInfo.edge === 'left') {
+            cursor = 'w-resize' // Ouest (gauche)
+          } else if (handleInfo.edge === 'right') {
+            cursor = 'e-resize' // Est (droite)
+          } else if (handleInfo.edge === 'top') {
+            cursor = 'n-resize' // Nord (haut)
+          } else if (handleInfo.edge === 'bottom') {
+            cursor = 'ns-resize' // Vertical (nord-sud) pour le bas aussi
+          }
+        }
+        
+        // Appliquer le curseur
+        if (threeSceneRef.value.renderer && threeSceneRef.value.renderer.domElement) {
+          const element = threeSceneRef.value.renderer.domElement
+          
+          // Utiliser setProperty pour forcer l'application
+          element.style.setProperty('cursor', cursor, 'important')
+          
+          // Fallback si setProperty ne fonctionne pas
+          if (element.style.cursor !== cursor) {
+            element.style.cursor = cursor
+          }
+          
+          console.log('🎯 Curseur changé:', cursor, 'pour handle:', handleInfo.handle || handleInfo.corner || handleInfo.edge, handleInfo)
+        }
+      }
+    } else {
+      // Plus de handle survolé, réinitialiser le style
+      if (currentHoveredHandle.value) {
+        currentHoveredHandle.value = null
+        if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
+          fabricDesignerRef.value.resetResizeHover()
+        }
+      }
+      
+      if (threeSceneRef.value && threeSceneRef.value.renderer) {
+        const element = threeSceneRef.value.renderer.domElement
+        element.style.setProperty('cursor', 'move', 'important')
+      }
     }
   }
 }
@@ -729,6 +800,12 @@ const on3DResizeEnd = () => {
     }
   }
   
+  // Réinitialiser le style de hover
+  if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
+    fabricDesignerRef.value.resetResizeHover()
+  }
+  currentHoveredHandle.value = null
+  
   isResizing.value = false
   resizeStartPos.value = { x: 0, y: 0 }
   currentResizeHandle.value = null
@@ -738,9 +815,16 @@ const on3DResizeEnd = () => {
     threeSceneRef.value.setResizing(false, null, null)
   }
   
-  // Remettre le curseur normal
+  // Désactiver le drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragState) {
+    threeSceneRef.value.setDragState(false)
+  }
+  
+  // Remettre le curseur normal (move pour déplacement)
   if (threeSceneRef.value && threeSceneRef.value.renderer) {
-    threeSceneRef.value.renderer.domElement.style.cursor = dragMode.value ? 'grab' : 'default'
+    const element = threeSceneRef.value.renderer.domElement
+    const defaultCursor = dragMode.value ? 'move' : 'default'
+    element.style.setProperty('cursor', defaultCursor, 'important')
   }
   
   console.log('📏 Fin du redimensionnement depuis 3D')
@@ -756,14 +840,22 @@ const on3DDragEnd = () => {
   dragOffset.value = { x: 0, y: 0 }
   dragStartPos.value = { x: 0, y: 0 }
   
+  // Réinitialiser le style de hover
+  if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
+    fabricDesignerRef.value.resetResizeHover()
+  }
+  currentHoveredHandle.value = null
+  
   // Désactiver le drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragState) {
     threeSceneRef.value.setDragState(false)
   }
   
-  // Remettre le curseur normal
+  // Remettre le curseur normal (move pour déplacement)
   if (threeSceneRef.value && threeSceneRef.value.renderer) {
-    threeSceneRef.value.renderer.domElement.style.cursor = dragMode.value ? 'grab' : 'default'
+    const element = threeSceneRef.value.renderer.domElement
+    const defaultCursor = dragMode.value ? 'move' : 'default'
+    element.style.setProperty('cursor', defaultCursor, 'important')
   }
   
   console.log('🎯 Fin du drag sur 3D')

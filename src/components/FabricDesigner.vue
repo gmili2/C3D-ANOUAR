@@ -2075,6 +2075,68 @@ const resetResizeData = (obj) => {
   }
 }
 
+// Variable pour stocker le style original de l'objet avant le hover
+let originalObjectStyle = null
+
+/**
+ * Met en évidence un handle de redimensionnement sur un objet
+ * 
+ * @param {fabric.Object} obj - L'objet à mettre en évidence
+ * @param {Object} handleInfo - Informations sur le handle (bord/coin)
+ */
+const highlightResizeHandle = (obj, handleInfo) => {
+  if (!canvas || !obj) return
+  
+  // Sauvegarder le style original si ce n'est pas déjà fait
+  if (!originalObjectStyle) {
+    originalObjectStyle = {
+      stroke: obj.stroke || 'transparent',
+      strokeWidth: obj.strokeWidth || 0,
+      shadow: obj.shadow ? (obj.shadow instanceof Object ? { ...obj.shadow } : obj.shadow) : null
+    }
+  }
+  
+  // Appliquer un style de mise en évidence
+  // Bordure colorée et épaisse pour montrer qu'on peut redimensionner
+  obj.set({
+    stroke: '#4f46e5', // Couleur bleue/violette
+    strokeWidth: 3,
+    shadow: {
+      color: 'rgba(79, 70, 229, 0.5)', // Ombre bleue/violette
+      blur: 10,
+      offsetX: 0,
+      offsetY: 0
+    }
+  })
+  
+  obj.setCoords()
+  canvas.renderAll()
+  requestTextureUpdate()
+}
+
+/**
+ * Réinitialise le style de l'objet après le survol
+ */
+const resetResizeHover = () => {
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  if (!activeObject || !originalObjectStyle) return
+  
+  // Restaurer le style original
+  activeObject.set({
+    stroke: originalObjectStyle.stroke,
+    strokeWidth: originalObjectStyle.strokeWidth,
+    shadow: originalObjectStyle.shadow
+  })
+  
+  originalObjectStyle = null
+  
+  activeObject.setCoords()
+  canvas.renderAll()
+  requestTextureUpdate()
+}
+
 /**
  * Déplace un objet sélectionné à une nouvelle position avec effet "wrap around"
  * 
@@ -2270,6 +2332,8 @@ defineExpose({
   detectResizeHandle,
   resizeSelectedObjectFromHandle,
   resetResizeData,
+  highlightResizeHandle,
+  resetResizeHover,
   undo,
   redo,
   deleteSelected

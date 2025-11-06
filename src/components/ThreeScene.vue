@@ -343,6 +343,11 @@ const initScene = () => {
   controls.enableZoom = false          // DÉSACTIVÉ : Pas de zoom pour avoir des coordonnées fixes
   controls.enablePan = false           // DÉSACTIVÉ : Pas de déplacement pour avoir des coordonnées fixes
   controls.enableRotate = true         // ACTIVÉ : Permet de tourner le modèle pour voir sous différents angles
+  // Désactiver la rotation verticale (autour de l'axe X)
+  // minPolarAngle et maxPolarAngle fixés à la même valeur = pas de rotation verticale
+  const fixedPolarAngle = Math.PI / 2  // Angle horizontal (90 degrés)
+  controls.minPolarAngle = fixedPolarAngle
+  controls.maxPolarAngle = fixedPolarAngle
 
   // ===== BOUCLE D'ANIMATION =====
   // Store pour la synchronisation des mises à jour de texture
@@ -979,11 +984,25 @@ const loadModel = async (url) => {
           child.material = new THREE.MeshStandardMaterial({
             color: 0xffffff,
             side: THREE.DoubleSide,
-            map: null // Will be set when texture is applied
+            map: null, // Will be set when texture is applied
+            transparent: true, // Rendre le gobelet transparent
+            opacity: 0.3 // Niveau de transparence (0 = complètement transparent, 1 = opaque)
           })
-        } else if (!child.material.map) {
-          // Ensure material can accept textures
-          child.material.map = null
+        } else {
+          // S'assurer que le matériau existant est aussi transparent
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              mat.transparent = true
+              mat.opacity = 0.3
+            })
+          } else {
+            child.material.transparent = true
+            child.material.opacity = 0.3
+          }
+          if (!child.material.map) {
+            // Ensure material can accept textures
+            child.material.map = null
+          }
         }
       }
     })
@@ -1008,6 +1027,10 @@ const loadModel = async (url) => {
       controls.enableZoom = false      // Pas de zoom pour coordonnées fixes
       controls.enablePan = false       // Pas de déplacement pour coordonnées fixes
       controls.enableRotate = true    // Rotation activée pour voir le modèle sous différents angles
+      // Maintenir la restriction de rotation verticale
+      const fixedPolarAngle = Math.PI / 2  // Angle horizontal (90 degrés)
+      controls.minPolarAngle = fixedPolarAngle
+      controls.maxPolarAngle = fixedPolarAngle
       controls.update()
     }
 
@@ -1315,22 +1338,30 @@ const applyTexture = (texture) => {
         child.material.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
             mat.map = texture
+            mat.transparent = true // Maintenir la transparence
+            mat.opacity = 0.3 // Maintenir le niveau de transparence
             mat.needsUpdate = true
           } else {
             child.material[idx] = new THREE.MeshStandardMaterial({
               map: texture,
-              side: THREE.DoubleSide
+              side: THREE.DoubleSide,
+              transparent: true, // Rendre transparent
+              opacity: 0.3 // Niveau de transparence
             })
           }
         })
       } else {
         if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
           child.material.map = texture
+          child.material.transparent = true // Maintenir la transparence
+          child.material.opacity = 0.3 // Maintenir le niveau de transparence
           child.material.needsUpdate = true
         } else {
           child.material = new THREE.MeshStandardMaterial({
             map: texture,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            transparent: true, // Rendre transparent
+            opacity: 0.3 // Niveau de transparence
           })
         }
       }

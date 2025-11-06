@@ -111,6 +111,8 @@ export const setupCanvasTexture = (canvas, materials) => {
           material instanceof THREE.MeshPhongMaterial ||
           material instanceof THREE.MeshBasicMaterial) {
         material.map = texture
+        material.transparent = true // Maintenir la transparence
+        material.opacity = 0.3 // Maintenir le niveau de transparence
         material.needsUpdate = true
       }
     }
@@ -167,12 +169,16 @@ export const applyTextureToMesh = (mesh, texture) => {
               mat instanceof THREE.MeshBasicMaterial) {
             // Matériau compatible : mettre à jour la texture
             mat.map = texture
+            mat.transparent = true // Maintenir la transparence
+            mat.opacity = 0.3 // Maintenir le niveau de transparence
             mat.needsUpdate = true
           } else {
             // Matériau incompatible : créer un nouveau matériau
             child.material = new THREE.MeshStandardMaterial({
               map: texture,
-              side: THREE.DoubleSide  // Rendu des deux côtés (important pour les t-shirts)
+              side: THREE.DoubleSide,  // Rendu des deux côtés (important pour les t-shirts)
+              transparent: true, // Rendre transparent
+              opacity: 0.3 // Niveau de transparence
             })
           }
         })
@@ -183,12 +189,16 @@ export const applyTextureToMesh = (mesh, texture) => {
             child.material instanceof THREE.MeshBasicMaterial) {
           // Matériau compatible : mettre à jour la texture
           child.material.map = texture
+          child.material.transparent = true // Maintenir la transparence
+          child.material.opacity = 0.3 // Maintenir le niveau de transparence
           child.material.needsUpdate = true
         } else {
           // Matériau incompatible : créer un nouveau matériau
           child.material = new THREE.MeshStandardMaterial({
             map: texture,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            transparent: true, // Rendre transparent
+            opacity: 0.3 // Niveau de transparence
           })
         }
       }

@@ -138,8 +138,9 @@ const drawWidth = ref(5)          // Largeur du pinceau en pixels
 const placementMode = ref(null)   // Mode placement: null, 'circle', 'rectangle', 'text', 'image'
 
 // ===== DIMENSIONS DU CANVAS =====
-const canvasWidth = props.canvasWidth || 1200
-const canvasHeight = props.canvasHeight || 900
+// Dimensions réduites pour mieux correspondre au modèle 3D
+const canvasWidth = props.canvasWidth || 800
+const canvasHeight = props.canvasHeight || 600
 
 // ===== STORE POUR LA SYNCHRONISATION =====
 // Store pour signaler les mises à jour de texture à Three.js
@@ -859,6 +860,9 @@ const initCanvas = () => {
       selection: true, // Permettre la sélection d'objets
       moveCursor: 'move', // Curseur de déplacement
       defaultCursor: 'default', // Curseur par défaut
+      // Désactiver le devicePixelRatio pour que les dimensions restent cohérentes
+      // Cela évite les problèmes de décalage entre les coordonnées 2D et 3D
+      enableRetinaScaling: false, // Désactiver le scaling retina/devicePixelRatio
       // Configuration des contrôles de redimensionnement
       uniformScaling: false, // Permettre le redimensionnement non-uniforme (largeur/hauteur séparées)
       centeredScaling: false, // Utiliser le coin comme point de référence (comportement standard)
@@ -866,6 +870,15 @@ const initCanvas = () => {
       // Activer tous les contrôles de transformation
       controlsAboveOverlay: false // Les contrôles sont au-dessus des objets
     })
+    
+    // Forcer les dimensions du canvas HTML à correspondre exactement aux dimensions logiques
+    // Cela garantit que canvas.width/height correspondent à canvasElement.width/height
+    if (canvasElement.value) {
+      canvasElement.value.width = canvasWidth
+      canvasElement.value.height = canvasHeight
+      canvasElement.value.style.width = `${canvasWidth}px`
+      canvasElement.value.style.height = `${canvasHeight}px`
+    }
     
     // Activer le déplacement et la sélection
     canvas.selection = true
@@ -989,10 +1002,21 @@ const initCanvas = () => {
     canvas.on('object:added', () => {
       saveHistory()
       signalChange()
+      // Notifier le parent pour mettre à jour la liste des objets
+      emit('objects-changed')
     })
     canvas.on('object:modified', () => {
       // Ne pas sauvegarder pendant la modification, seulement après
       signalChange()
+      
+      // Mettre à jour les coordonnées de l'objet sélectionné si nécessaire
+      const activeObject = canvas.getActiveObject()
+      if (activeObject) {
+        emit('object-selected', {
+          object: activeObject,
+          type: activeObject.type
+        })
+      }
     })
     canvas.on('object:removed', (e) => {
       const obj = e.target
@@ -1002,6 +1026,8 @@ const initCanvas = () => {
       }
       saveHistory()
       signalChange()
+      // Notifier le parent pour mettre à jour la liste des objets
+      emit('objects-changed')
     })
     canvas.on('object:moving', async (e) => {
       // Appliquer l'effet wrap around pendant le déplacement avec la souris
@@ -1015,6 +1041,15 @@ const initCanvas = () => {
           // Si c'est l'original qui bouge, mettre à jour les copies
           await applyWrapAround(obj)
         }
+      }
+      
+      // Mettre à jour les coordonnées de l'objet sélectionné en temps réel
+      const activeObject = canvas.getActiveObject()
+      if (activeObject === obj) {
+        emit('object-selected', {
+          object: activeObject,
+          type: activeObject.type
+        })
       }
       
       // Pendant le déplacement, mettre à jour fréquemment
@@ -1081,6 +1116,16 @@ const initCanvas = () => {
           await applyWrapAround(obj)
         }
       }
+      
+      // Mettre à jour les coordonnées de l'objet sélectionné en temps réel
+      const activeObject = canvas.getActiveObject()
+      if (activeObject === obj) {
+        emit('object-selected', {
+          object: activeObject,
+          type: activeObject.type
+        })
+      }
+      
       // Pendant le redimensionnement, mettre à jour en temps réel
       canvas.renderAll()
       requestTextureUpdate()
@@ -1822,25 +1867,113 @@ const findObjectAtPosition = (x, y) => {
   if (!canvas) return null
   
   // Obtenir tous les objets (sauf les indicateurs de zone de travail)
-  const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+  const objects = canvas.getObjects().filter(obj => 
+    !obj.userData?.isWorkZoneIndicator && 
+    obj.visible !== false &&
+    (obj.selectable !== false || obj.evented !== false)
+  )
   
   // Parcourir les objets de haut en bas (les derniers ajoutés sont en premier)
   // et trouver celui qui contient le point
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i]
     
-    // Vérifier si le point est dans les limites de l'objet
-    const objLeft = obj.left || 0
-    const objTop = obj.top || 0
-    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    // S'assurer que les coordonnées de l'objet sont à jour
+    if (obj.setCoords) {
+      obj.setCoords()
+    }
     
-    // Vérifier si le point est dans les limites de l'objet
-    if (x >= objLeft && x <= objLeft + objWidth &&
-        y >= objTop && y <= objTop + objHeight) {
-      // Vérifier si l'objet est visible et sélectionnable
-      if (obj.visible && (obj.selectable !== false || obj.evented !== false)) {
+    // Utiliser la méthode native containsPoint de Fabric.js si disponible
+    // qui prend en compte toutes les transformations (rotation, scale, origine, etc.)
+    try {
+      if (typeof obj.containsPoint === 'function') {
+        // containsPoint attend un point avec x et y
+        const point = { x, y }
+        if (obj.containsPoint(point)) {
+          return obj
+        }
+      }
+    } catch (e) {
+      // Si containsPoint échoue, continuer avec le fallback
+      console.debug('containsPoint failed, using fallback:', e)
+    }
+    
+    // Fallback: utiliser une vérification améliorée qui prend en compte l'origine de l'objet
+    // et les transformations de base
+    // Obtenir les coordonnées transformées de l'objet
+    const coords = obj.aCoords || obj.oCoords || {}
+    
+    if (coords && coords.tl && coords.tr && coords.bl && coords.br) {
+      // Utiliser les coordonnées transformées (prend en compte la rotation)
+      // Vérifier si le point est dans le polygone formé par les 4 coins
+      const points = [coords.tl, coords.tr, coords.br, coords.bl]
+      
+      // Algorithme du point dans un polygone (ray casting)
+      let inside = false
+      for (let j = 0, k = points.length - 1; j < points.length; k = j++) {
+        const xi = points[j].x
+        const yi = points[j].y
+        const xj = points[k].x
+        const yj = points[k].y
+        
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+        if (intersect) inside = !inside
+      }
+      
+      if (inside) {
         return obj
+      }
+    } else {
+      // Si les coordonnées transformées ne sont pas disponibles, utiliser une vérification basique
+      const objLeft = obj.left || 0
+      const objTop = obj.top || 0
+      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+      
+      // Prendre en compte l'origine de l'objet
+      const originX = obj.originX || 'left'
+      const originY = obj.originY || 'top'
+      
+      let actualLeft = objLeft
+      let actualTop = objTop
+      
+      if (originX === 'center') {
+        actualLeft = objLeft - objWidth / 2
+      } else if (originX === 'right') {
+        actualLeft = objLeft - objWidth
+      }
+      
+      if (originY === 'center') {
+        actualTop = objTop - objHeight / 2
+      } else if (originY === 'bottom') {
+        actualTop = objTop - objHeight
+      }
+      
+      // Vérifier si le point est dans les limites de l'objet
+      // Utiliser une tolérance plus grande pour améliorer la détection (20px)
+      const tolerance = 20
+      if (x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
+          y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance) {
+        // Pour les cercles, vérifier aussi la distance au centre
+        if (obj.type === 'circle' && obj.radius) {
+          const centerX = objLeft
+          const centerY = objTop
+          const radius = obj.radius * (obj.scaleX || 1)
+          const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+          if (distance <= radius + tolerance) {
+            console.log('✅ Cercle trouvé à la position:', { x, y, centerX, centerY, radius, distance })
+            return obj
+          }
+        } else {
+          // Pour les autres objets, la vérification rectangulaire suffit
+          console.log('✅ Objet rectangulaire trouvé à la position:', { 
+            x, y, 
+            actualLeft, actualTop, 
+            objWidth, objHeight,
+            type: obj.type 
+          })
+          return obj
+        }
       }
     }
   }
@@ -1916,11 +2049,25 @@ const detectResizeHandle = (obj, x, y, threshold = 10) => {
  * @returns {boolean} - true si un objet a été sélectionné
  */
 const selectObjectAtPosition = (x, y) => {
-  if (!canvas) return false
+  if (!canvas) {
+    console.warn('⚠️ Canvas non disponible pour selectObjectAtPosition')
+    return false
+  }
+  
+  console.log('🔍 Recherche d\'objet à la position:', { x, y })
   
   const obj = findObjectAtPosition(x, y)
   
   if (obj) {
+    console.log('✅ Objet trouvé:', {
+      type: obj.type,
+      left: obj.left,
+      top: obj.top,
+      width: obj.width,
+      height: obj.height,
+      isWrapAroundCopy: obj.userData?.isWrapAroundCopy
+    })
+    
     // Si c'est une copie wrap-around, sélectionner l'original à la place
     const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
       ? obj.userData.originalObject 
@@ -1938,7 +2085,251 @@ const selectObjectAtPosition = (x, y) => {
     return true
   }
   
-  // Si aucun objet n'a été trouvé, désélectionner
+  // Si aucun objet n'a été trouvé exactement, chercher l'objet le plus proche
+  console.log('ℹ️ Aucun objet trouvé exactement à la position:', { x, y })
+  
+  const objects = canvas.getObjects().filter(obj => 
+    !obj.userData?.isWorkZoneIndicator && 
+    obj.visible !== false &&
+    (obj.selectable !== false || obj.evented !== false)
+  )
+  
+  // Si il n'y a qu'un seul objet, vérifier s'il est proche du point de clic
+  // Si oui, le sélectionner, sinon désélectionner
+  if (objects.length === 1) {
+    const obj = objects[0]
+    const objLeft = obj.left || 0
+    const objTop = obj.top || 0
+    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    const originX = obj.originX || 'left'
+    const originY = obj.originY || 'top'
+    
+    let actualLeft = objLeft
+    let actualTop = objTop
+    
+    if (originX === 'center') {
+      actualLeft = objLeft - objWidth / 2
+    } else if (originX === 'right') {
+      actualLeft = objLeft - objWidth
+    }
+    
+    if (originY === 'center') {
+      actualTop = objTop - objHeight / 2
+    } else if (originY === 'bottom') {
+      actualTop = objTop - objHeight
+    }
+    
+    // Vérifier si le clic est proche de l'objet (tolérance de 100px)
+    const tolerance = 100
+    const isNear = x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
+                   y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
+    
+    console.log('🔍 Vérification objet unique (détaillé):', {
+      click: { x: x.toFixed(2), y: y.toFixed(2) },
+      object: {
+        type: obj.type,
+        left: actualLeft.toFixed(2),
+        top: actualTop.toFixed(2),
+        width: objWidth.toFixed(2),
+        height: objHeight.toFixed(2),
+        scaleX: obj.scaleX?.toFixed(2) || '1.00',
+        scaleY: obj.scaleY?.toFixed(2) || '1.00',
+        angle: obj.angle?.toFixed(2) || '0.00'
+      },
+      bounds: {
+        minX: (actualLeft - tolerance).toFixed(2),
+        maxX: (actualLeft + objWidth + tolerance).toFixed(2),
+        minY: (actualTop - tolerance).toFixed(2),
+        maxY: (actualTop + objHeight + tolerance).toFixed(2)
+      },
+      distance: {
+        fromLeft: (x - actualLeft).toFixed(2),
+        fromTop: (y - actualTop).toFixed(2),
+        fromCenterX: (x - (actualLeft + objWidth / 2)).toFixed(2),
+        fromCenterY: (y - (actualTop + objHeight / 2)).toFixed(2)
+      },
+      isNear: isNear
+    })
+    
+    if (isNear) {
+      console.log('✅ Un seul objet disponible et clic proche, sélection')
+      const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
+        ? obj.userData.originalObject 
+        : obj
+      
+      canvas.setActiveObject(targetObject)
+      canvas.renderAll()
+      
+      emit('object-selected', {
+        object: targetObject,
+        type: targetObject.type
+      })
+      
+      return true
+    } else {
+      console.log('ℹ️ Clic loin de l\'objet unique, désélection')
+      canvas.discardActiveObject()
+      canvas.renderAll()
+      emit('object-deselected')
+      return false
+    }
+  }
+  
+  // Chercher l'objet le plus proche du point de clic
+  // Si aucun objet n'est trouvé exactement, prendre le plus proche même s'il est loin
+  let closestObj = null
+  let closestDistance = Infinity
+  
+  objects.forEach(obj => {
+    const objLeft = obj.left || 0
+    const objTop = obj.top || 0
+    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    const originX = obj.originX || 'left'
+    const originY = obj.originY || 'top'
+    
+    let actualLeft = objLeft
+    let actualTop = objTop
+    
+    if (originX === 'center') {
+      actualLeft = objLeft - objWidth / 2
+    } else if (originX === 'right') {
+      actualLeft = objLeft - objWidth
+    }
+    
+    if (originY === 'center') {
+      actualTop = objTop - objHeight / 2
+    } else if (originY === 'bottom') {
+      actualTop = objTop - objHeight
+    }
+    
+    // Calculer le centre de l'objet
+    const centerX = actualLeft + objWidth / 2
+    const centerY = actualTop + objHeight / 2
+    
+    // Calculer la distance du point de clic au centre de l'objet
+    const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+    
+    // Vérifier si le point est dans les limites de l'objet (avec tolérance très large)
+    const tolerance = 200 // Tolérance très large (200px) pour capturer même les objets éloignés
+    const isInBounds = x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
+                       y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
+    
+    // Si l'objet est dans les bounds OU si c'est le plus proche jusqu'à présent
+    if ((isInBounds || objects.length === 1) && distance < closestDistance) {
+      closestDistance = distance
+      closestObj = obj
+    }
+  })
+  
+  // Si on n'a toujours pas trouvé d'objet mais qu'il y a des objets, prendre le plus proche
+  // MAIS seulement s'il est dans une zone raisonnable (max 300px)
+  if (!closestObj && objects.length > 0) {
+    console.log('⚠️ Aucun objet dans la zone de tolérance, recherche du plus proche')
+    const maxDistance = 300 // Distance maximale pour sélectionner un objet
+    objects.forEach(obj => {
+      const objLeft = obj.left || 0
+      const objTop = obj.top || 0
+      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+      const originX = obj.originX || 'left'
+      const originY = obj.originY || 'top'
+      
+      let actualLeft = objLeft
+      let actualTop = objTop
+      
+      if (originX === 'center') {
+        actualLeft = objLeft - objWidth / 2
+      } else if (originX === 'right') {
+        actualLeft = objLeft - objWidth
+      }
+      
+      if (originY === 'center') {
+        actualTop = objTop - objHeight / 2
+      } else if (originY === 'bottom') {
+        actualTop = objTop - objHeight
+      }
+      
+      const centerX = actualLeft + objWidth / 2
+      const centerY = actualTop + objHeight / 2
+      const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+      
+      // Ne sélectionner que si l'objet est dans une distance raisonnable
+      if (distance < closestDistance && distance < maxDistance) {
+        closestDistance = distance
+        closestObj = obj
+      }
+    })
+  }
+  
+  // Si on a trouvé un objet proche, le sélectionner
+  if (closestObj) {
+    console.log('✅ Objet le plus proche trouvé:', {
+      type: closestObj.type,
+      distance: closestDistance,
+      left: closestObj.left,
+      top: closestObj.top
+    })
+    
+    const targetObject = closestObj.userData?.isWrapAroundCopy && closestObj.userData?.originalObject 
+      ? closestObj.userData.originalObject 
+      : closestObj
+    
+    canvas.setActiveObject(targetObject)
+    canvas.renderAll()
+    
+    emit('object-selected', {
+      object: targetObject,
+      type: targetObject.type
+    })
+    
+    return true
+  }
+  
+  // Afficher les détails pour le débogage
+  console.log('📊 Objets disponibles:', objects.map(obj => {
+    const objLeft = obj.left || 0
+    const objTop = obj.top || 0
+    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    const originX = obj.originX || 'left'
+    const originY = obj.originY || 'top'
+    
+    let actualLeft = objLeft
+    let actualTop = objTop
+    
+    if (originX === 'center') {
+      actualLeft = objLeft - objWidth / 2
+    } else if (originX === 'right') {
+      actualLeft = objLeft - objWidth
+    }
+    
+    if (originY === 'center') {
+      actualTop = objTop - objHeight / 2
+    } else if (originY === 'bottom') {
+      actualTop = objTop - objHeight
+    }
+    
+    const centerX = actualLeft + objWidth / 2
+    const centerY = actualTop + objHeight / 2
+    const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
+    
+    return {
+      type: obj.type,
+      left: objLeft,
+      top: objTop,
+      actualLeft,
+      actualTop,
+      centerX,
+      centerY,
+      width: objWidth,
+      height: objHeight,
+      distanceFromClick: distance,
+      clickPosition: { x, y }
+    }
+  }))
+  
   canvas.discardActiveObject()
   canvas.renderAll()
   emit('object-deselected')

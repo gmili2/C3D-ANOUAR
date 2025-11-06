@@ -75,6 +75,22 @@ export const setupCanvasTexture = (canvas, materials) => {
   // Cette texture est liée au canvas et se met à jour automatiquement
   const texture = new THREE.CanvasTexture(canvas)
   
+  // IMPORTANT: S'assurer que la texture utilise les dimensions exactes du canvas
+  // et non pas les dimensions multipliées par devicePixelRatio
+  // Cela garantit la cohérence entre les coordonnées 2D (Fabric.js) et 3D (Three.js)
+  if (canvas.width && canvas.height) {
+    // Forcer les dimensions de la texture à correspondre exactement au canvas
+    // Note: CanvasTexture utilise automatiquement canvas.width et canvas.height
+    // mais on s'assure qu'ils correspondent aux dimensions logiques
+    console.log('📐 Création texture avec dimensions:', {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      canvasOffsetWidth: canvas.offsetWidth,
+      canvasOffsetHeight: canvas.offsetHeight,
+      devicePixelRatio: window.devicePixelRatio || 1
+    })
+  }
+  
   // ===== CONFIGURATION OPTIMALE POUR LES TEXTURES CANVAS =====
   texture.minFilter = THREE.LinearFilter      // Filtre pour le minification (zoom out)
   texture.magFilter = THREE.LinearFilter      // Filtre pour le magnification (zoom in)

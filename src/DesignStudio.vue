@@ -51,6 +51,7 @@
           :placement-mode="placementMode"
           :placement-type="placementType"
           :drag-mode="dragMode"
+          :selected-object="selectedObject"
           @model-loaded="onModelLoaded"
           @model-error="onModelError"
           @texture-ready="onTextureReady"
@@ -76,7 +77,45 @@
         <!-- Contrôles de zone de travail -->
         <div class="work-zone-controls" v-if="hasModel">
           <div class="control-group">
-            <label>Zone de travail verticale</label>
+            <label>Configuration de la zone personnalisable</label>
+            
+            <!-- Configuration par dimensions réelles -->
+            <div class="config-section">
+              <label class="slider-label">
+                Hauteur totale du gobelet (cm):
+                <input 
+                  type="number" 
+                  v-model.number="gobletHeightCm" 
+                  min="1" 
+                  max="50" 
+                  step="0.5"
+                  @input="updateWorkZones"
+                />
+                cm
+              </label>
+              <label class="slider-label">
+                Zone personnalisable (cm):
+                <input 
+                  type="number" 
+                  v-model.number="customizableHeightCm" 
+                  min="1" 
+                  max="50" 
+                  step="0.5"
+                  @input="updateWorkZones"
+                />
+                cm
+              </label>
+              <label class="slider-label">
+                Position:
+                <select v-model="customizablePosition" @change="updateWorkZones">
+                  <option value="center">Centrée</option>
+                  <option value="top">En haut</option>
+                  <option value="bottom">En bas</option>
+                </select>
+              </label>
+            </div>
+            
+            <!-- Affichage des zones calculées -->
             <div class="slider-group">
               <label class="slider-label">
                 Exclure haut:
@@ -104,15 +143,20 @@
               </label>
             </div>
             <div class="zone-info">
-              Zone active: {{ 100 - workZoneTop - workZoneBottom }}% ({{ workZoneTop }}% haut exclu, {{ workZoneBottom }}% bas exclu)
+              <strong>Zone active:</strong> {{ 100 - workZoneTop - workZoneBottom }}% 
+              ({{ customizableHeightCm }} cm sur {{ gobletHeightCm }} cm)
+              <br>
+              <small>{{ workZoneTop }}% haut exclu, {{ workZoneBottom }}% bas exclu</small>
+              <br>
+              <small><strong>Canvas 2D:</strong> {{ canvasWidth }}x{{ canvasHeight }} pixels (correspond à {{ customizableHeightCm }} cm)</small>
             </div>
           </div>
         </div>
         
         <FabricDesigner
           ref="fabricDesignerRef"
-          :canvas-width="1200"
-          :canvas-height="900"
+          :canvas-width="canvasWidth"
+          :canvas-height="canvasHeight"
           :work-zone-top="workZoneTop / 100"
           :work-zone-bottom="workZoneBottom / 100"
           @design-updated="onDesignUpdated"
@@ -121,6 +165,7 @@
           @object-selected="onObjectSelected"
           @object-deselected="onObjectDeselected"
           @move-object="onMoveObject"
+          @objects-changed="updateAllObjectsList"
         />
       </div>
     </div>
@@ -160,7 +205,7 @@
  * pour gérer l'état et la logique de l'application de design 3D.
  */
 
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import ThreeScene from './components/ThreeScene.vue'
 import FabricDesigner from './components/FabricDesigner.vue'
 import MeshSelector from './components/MeshSelector.vue'
@@ -187,8 +232,87 @@ const selectedMesh = ref(null)               // Mesh actuellement sélectionné
 // ===== CONFIGURATION DES ZONES DE TRAVAIL =====
 // Ces valeurs définissent les zones du canvas où on ne peut pas placer d'éléments
 // Utile pour exclure certaines parties du modèle (manches, col, etc.)
-const workZoneTop = ref(10)      // Pourcentage à exclure du haut (défaut 10%)
-const workZoneBottom = ref(10)  // Pourcentage à exclure du bas (défaut 10%)
+
+// Configuration pour personnaliser seulement une zone spécifique (ex: 8 cm)
+const gobletHeightCm = ref(12)        // Hauteur totale du gobelet en cm (à ajuster selon votre modèle)
+const customizableHeightCm = ref(8)   // Hauteur de la zone personnalisable en cm
+const customizablePosition = ref('center') // Position: 'center', 'top', 'bottom'
+
+// Calcul automatique des zones de travail basé sur les dimensions réelles
+const calculateWorkZones = () => {
+  const totalHeight = gobletHeightCm.value
+  const customizableHeight = customizableHeightCm.value
+  
+  if (customizableHeight >= totalHeight) {
+    // Si la zone personnalisable est plus grande que le gobelet, tout est personnalisable
+    return { top: 0, bottom: 0 }
+  }
+  
+  const excludedHeight = totalHeight - customizableHeight
+  
+  if (customizablePosition.value === 'center') {
+    // Zone centrée : exclure équitablement le haut et le bas
+    const topExcluded = excludedHeight / 2
+    const bottomExcluded = excludedHeight / 2
+    return {
+      top: (topExcluded / totalHeight) * 100,
+      bottom: (bottomExcluded / totalHeight) * 100
+    }
+  } else if (customizablePosition.value === 'top') {
+    // Zone en haut : exclure seulement le bas
+    return {
+      top: 0,
+      bottom: (excludedHeight / totalHeight) * 100
+    }
+  } else {
+    // Zone en bas : exclure seulement le haut
+    return {
+      top: (excludedHeight / totalHeight) * 100,
+      bottom: 0
+    }
+  }
+}
+
+const workZoneTop = ref(10)      // Pourcentage à exclure du haut (calculé automatiquement)
+const workZoneBottom = ref(10)  // Pourcentage à exclure du bas (calculé automatiquement)
+
+// Calculer la hauteur du canvas basée sur la zone personnalisable
+// Le canvas doit avoir une hauteur proportionnelle à la zone personnalisable
+const canvasHeight = computed(() => {
+  // Hauteur de base du canvas (800x600)
+  const baseHeight = 600
+  const baseWidth = 800
+  
+  // Calculer le ratio de la zone personnalisable par rapport à la hauteur totale
+  const customizableRatio = customizableHeightCm.value / gobletHeightCm.value
+  
+  // La hauteur du canvas correspond à la zone personnalisable
+  // On garde une hauteur minimale pour que le canvas reste utilisable
+  const minHeight = 200
+  const calculatedHeight = Math.max(minHeight, baseHeight * customizableRatio)
+  
+  return Math.round(calculatedHeight)
+})
+
+// Largeur du canvas (peut être ajustée si nécessaire)
+const canvasWidth = computed(() => {
+  return 800 // Largeur fixe pour l'instant
+})
+
+// Calculer les zones initiales
+const updateWorkZones = () => {
+  const zones = calculateWorkZones()
+  workZoneTop.value = Math.round(zones.top)
+  workZoneBottom.value = Math.round(zones.bottom)
+}
+
+// Initialiser les zones
+updateWorkZones()
+
+// Watch pour mettre à jour automatiquement les zones quand les paramètres changent
+watch([gobletHeightCm, customizableHeightCm, customizablePosition], () => {
+  updateWorkZones()
+})
 
 // ===== MODES D'INTERACTION =====
 const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
@@ -301,6 +425,9 @@ const onModelLoaded = async (mesh) => {
       }
     }
   }
+  
+  // Mettre à jour la liste de tous les objets
+  updateAllObjectsList()
 }
 
 /**
@@ -419,7 +546,27 @@ const on3DClickForPlacement = (clickData) => {
   }
   
   // Sinon, sélectionner l'objet à cette position sur le modèle 3D
+  console.log('🖱️ Clic sur modèle 3D - Tentative de sélection:', {
+    canvasX: clickData.canvasX,
+    canvasY: clickData.canvasY,
+    hasFabricDesigner: !!fabricDesignerRef.value,
+    hasSelectMethod: !!(fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition)
+  })
+  
   if (fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition) {
+    // Vérifier d'abord s'il y a des objets sur le canvas
+    const canvas = fabricDesignerRef.value.getCanvas()
+    if (canvas) {
+      const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+      console.log('📦 Objets sur le canvas:', objects.length, objects.map(obj => ({
+        type: obj.type,
+        left: obj.left,
+        top: obj.top,
+        width: obj.width,
+        height: obj.height
+      })))
+    }
+    
     const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)
     if (found) {
       console.log('✅ Objet sélectionné depuis le modèle 3D à la position:', {
@@ -432,13 +579,18 @@ const on3DClickForPlacement = (clickData) => {
         threeSceneRef.value.setDragMode(true)
       }
     } else {
-      console.log('ℹ️ Aucun objet trouvé à cette position sur le modèle 3D')
+      console.log('ℹ️ Aucun objet trouvé à cette position sur le modèle 3D:', {
+        x: clickData.canvasX,
+        y: clickData.canvasY
+      })
       // Désactiver le mode drag si aucun objet n'est trouvé
       dragMode.value = false
       if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
         threeSceneRef.value.setDragMode(false)
       }
     }
+  } else {
+    console.warn('⚠️ FabricDesigner ou méthode selectObjectAtPosition non disponible')
   }
 }
 
@@ -473,24 +625,62 @@ const onPlacementModeChanged = (modeData) => {
   }
 }
 
+// Variable pour stocker l'objet sélectionné
+const selectedObject = ref(null)
+
 const onObjectSelected = (data) => {
   console.log('Objet sélectionné dans Fabric:', data)
+  selectedObject.value = data.object
   dragMode.value = true
   
   // Activer le mode drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
     threeSceneRef.value.setDragMode(true)
   }
+  
+  // Mettre à jour les coordonnées de l'objet sélectionné dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+    threeSceneRef.value.updateSelectedObjectCoords(data.object)
+  }
+  
+  // Mettre à jour la liste de tous les objets
+  updateAllObjectsList()
 }
 
 const onObjectDeselected = () => {
   console.log('Objet désélectionné dans Fabric')
+  selectedObject.value = null
   dragMode.value = false
   isDragging.value = false
   
   // Désactiver le mode drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
     threeSceneRef.value.setDragMode(false)
+  }
+  
+  // Masquer les coordonnées de l'objet sélectionné
+  if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+    threeSceneRef.value.updateSelectedObjectCoords(null)
+  }
+  
+  // Mettre à jour la liste de tous les objets
+  updateAllObjectsList()
+}
+
+/**
+ * Met à jour la liste de tous les objets dans ThreeScene
+ */
+const updateAllObjectsList = () => {
+  if (!fabricDesignerRef.value || !fabricDesignerRef.value.getCanvas) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas) return
+  
+  const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+  
+  // Mettre à jour la liste dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.updateObjectsListFromCanvas) {
+    threeSceneRef.value.updateObjectsListFromCanvas(objects)
   }
 }
 
@@ -908,6 +1098,9 @@ const onFabricCanvasReady = (htmlCanvas) => {
   if (hasModel.value && threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
     threeSceneRef.value.setupSharedCanvasTexture(htmlCanvas)
   }
+  
+  // Mettre à jour la liste de tous les objets
+  updateAllObjectsList()
 }
 
 const updateTextureRealTime = () => {
@@ -1013,6 +1206,36 @@ const applyDesignToModel = async () => {
     errorMessage.value = `Erreur: ${error.message}`
   }
 }
+
+// ===== CHARGEMENT PAR DÉFAUT DU MODÈLE =====
+/**
+ * Charge le modèle par défaut au montage du composant
+ */
+onMounted(async () => {
+  try {
+    // Charger le fichier downloadSvg3.obj par défaut
+    // Utiliser un import dynamique avec Vite pour charger le fichier
+    const objUrl = new URL('./downloadSvg3.obj', import.meta.url)
+    
+    const response = await fetch(objUrl)
+    if (!response.ok) {
+      console.warn('Impossible de charger le modèle par défaut depuis downloadSvg3.obj')
+      return
+    }
+    
+    const blob = await response.blob()
+    const file = new File([blob], 'downloadSvg3.obj', { type: 'model/obj' })
+    
+    // Attendre un peu pour que les composants soient prêts
+    await nextTick()
+    
+    uploadedModel.value = file
+    console.log('✅ Modèle par défaut chargé: downloadSvg3.obj')
+  } catch (error) {
+    console.warn('⚠️ Impossible de charger le modèle par défaut:', error)
+    // Ne pas afficher d'erreur à l'utilisateur, juste un log
+  }
+})
 </script>
 
 <style scoped>

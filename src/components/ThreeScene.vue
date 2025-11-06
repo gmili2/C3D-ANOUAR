@@ -22,6 +22,96 @@
       :scene="scene"
       :camera="camera"
     />
+    <!-- Affichage des coordonnées en temps réel -->
+    <div v-if="coordinatesDisplay.show" class="coordinates-display">
+      <div class="coord-title">📍 Coordonnées Curseur</div>
+      <div class="coord-section">
+        <div class="coord-label">3D (UV):</div>
+        <div class="coord-value">
+          U: {{ coordinatesDisplay.uvU.toFixed(3) }}, 
+          V: {{ coordinatesDisplay.uvV.toFixed(3) }}
+        </div>
+      </div>
+      <div class="coord-section">
+        <div class="coord-label">2D (Canvas):</div>
+        <div class="coord-value">
+          X: {{ coordinatesDisplay.canvasX.toFixed(1) }}, 
+          Y: {{ coordinatesDisplay.canvasY.toFixed(1) }}
+        </div>
+      </div>
+      <div v-if="coordinatesDisplay.worldPos" class="coord-section">
+        <div class="coord-label">3D (World):</div>
+        <div class="coord-value">
+          X: {{ coordinatesDisplay.worldPos.x.toFixed(2) }}, 
+          Y: {{ coordinatesDisplay.worldPos.y.toFixed(2) }}, 
+          Z: {{ coordinatesDisplay.worldPos.z.toFixed(2) }}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Affichage des coordonnées de l'élément sélectionné -->
+    <div v-if="selectedObjectCoords.show" class="coordinates-display selected-object-coords">
+      <div class="coord-title">🎯 Élément Sélectionné</div>
+      <div class="coord-content">
+        <div class="coord-section">
+          <div class="coord-label">Type:</div>
+          <div class="coord-value">{{ selectedObjectCoords.type }}</div>
+        </div>
+        <div class="coord-section">
+          <div class="coord-label">Position 2D:</div>
+          <div class="coord-value">
+            X: {{ selectedObjectCoords.left.toFixed(1) }}, 
+            Y: {{ selectedObjectCoords.top.toFixed(1) }}
+          </div>
+        </div>
+        <div class="coord-section">
+          <div class="coord-label">Taille:</div>
+          <div class="coord-value">
+            W: {{ selectedObjectCoords.width.toFixed(1) }}, 
+            H: {{ selectedObjectCoords.height.toFixed(1) }}
+          </div>
+        </div>
+        <div v-if="selectedObjectCoords.scaleX !== 1 || selectedObjectCoords.scaleY !== 1" class="coord-section">
+          <div class="coord-label">Échelle:</div>
+          <div class="coord-value">
+            X: {{ selectedObjectCoords.scaleX.toFixed(2) }}, 
+            Y: {{ selectedObjectCoords.scaleY.toFixed(2) }}
+          </div>
+        </div>
+        <div v-if="selectedObjectCoords.angle" class="coord-section">
+          <div class="coord-label">Rotation:</div>
+          <div class="coord-value">{{ selectedObjectCoords.angle.toFixed(1) }}°</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Liste de tous les éléments -->
+    <div v-if="allObjectsList.length > 0" class="coordinates-display all-objects-list">
+      <div class="coord-title">📋 Tous les Éléments ({{ allObjectsList.length }})</div>
+      <div class="objects-scroll-container">
+        <div 
+          v-for="(obj, index) in allObjectsList" 
+          :key="index"
+          class="object-item"
+          :class="{ 'selected': obj.isSelected }"
+        >
+          <div class="object-header">
+            <span class="object-type">{{ obj.type }}</span>
+            <span v-if="obj.isSelected" class="selected-badge">✓</span>
+          </div>
+          <div class="object-details">
+            <div class="object-detail-row">
+              <span>X:</span> {{ obj.left.toFixed(1) }}, 
+              <span>Y:</span> {{ obj.top.toFixed(1) }}
+            </div>
+            <div class="object-detail-row">
+              <span>W:</span> {{ obj.width.toFixed(1) }}, 
+              <span>H:</span> {{ obj.height.toFixed(1) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -44,8 +134,8 @@ import TextureUpdater from './TextureUpdater.vue'
 // ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
   modelUrl: {
-    type: String,
-    default: null  // URL ou fichier du modèle OBJ à charger
+    type: [String, File],
+    default: null  // URL (String) ou fichier (File) du modèle OBJ à charger
   },
   texture: {
     type: THREE.Texture,
@@ -78,6 +168,10 @@ const props = defineProps({
   dragMode: {
     type: Boolean,
     default: false  // Mode drag actif (glisser pour déplacer)
+  },
+  selectedObject: {
+    type: Object,
+    default: null  // Objet sélectionné sur le canvas 2D
   }
 })
 
@@ -117,6 +211,30 @@ let animationId = null    // ID de l'animation frame pour cleanup
 let handleResize = null   // Handler pour le redimensionnement
 let canvasTexture = null  // Texture partagée du canvas 2D (Fabric.js)
 
+// ===== AFFICHAGE DES COORDONNÉES =====
+const coordinatesDisplay = ref({
+  show: false,
+  uvU: 0,
+  uvV: 0,
+  canvasX: 0,
+  canvasY: 0,
+  worldPos: null
+})
+
+const selectedObjectCoords = ref({
+  show: false,
+  type: '',
+  left: 0,
+  top: 0,
+  width: 0,
+  height: 0,
+  scaleX: 1,
+  scaleY: 1,
+  angle: 0
+})
+
+const allObjectsList = ref([])
+
 onMounted(async () => {
   await nextTick()
   initScene()
@@ -131,12 +249,30 @@ onMounted(async () => {
   }
 })
 
-// Watch pour le canvas 2D
-watch(() => props.canvas2D, (newCanvas) => {
+// Watch pour mettre à jour les coordonnées de l'objet sélectionné
+watch(() => props.selectedObject, (newObject) => {
+  updateSelectedObjectCoords(newObject)
+}, { deep: true })
+
+// Watch pour le canvas 2D - Reconfigurer la texture quand le canvas change
+watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
   if (newCanvas && currentMesh) {
+    // Vérifier si les dimensions ont changé
+    const oldWidth = oldCanvas?.width || 0
+    const oldHeight = oldCanvas?.height || 0
+    const newWidth = newCanvas.width || 0
+    const newHeight = newCanvas.height || 0
+    
+    if (oldWidth !== newWidth || oldHeight !== newHeight) {
+      console.log('📐 Dimensions du canvas changées:', {
+        old: { width: oldWidth, height: oldHeight },
+        new: { width: newWidth, height: newHeight }
+      })
+    }
+    
     setupSharedCanvasTexture(newCanvas)
   }
-})
+}, { deep: true })
 
 onUnmounted(() => {
   cleanup()
@@ -204,8 +340,9 @@ const initScene = () => {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true        // Amortissement pour un mouvement fluide
   controls.dampingFactor = 0.05        // Facteur d'amortissement
-  controls.enableZoom = true           // Activer le zoom avec la molette
-  controls.enablePan = true           // Activer le déplacement (pan)
+  controls.enableZoom = false          // DÉSACTIVÉ : Pas de zoom pour avoir des coordonnées fixes
+  controls.enablePan = false           // DÉSACTIVÉ : Pas de déplacement pour avoir des coordonnées fixes
+  controls.enableRotate = true         // ACTIVÉ : Permet de tourner le modèle pour voir sous différents angles
 
   // ===== BOUCLE D'ANIMATION =====
   // Store pour la synchronisation des mises à jour de texture
@@ -263,6 +400,7 @@ const initScene = () => {
 
 // ===== VARIABLES POUR LES INTERACTIONS =====
 let raycaster3D = null        // Raycaster pour détecter les clics sur le modèle 3D
+let mouse = null              // Coordonnées de la souris normalisées (-1 à 1)
 let isDragging3D = false      // Indique si on est en train de glisser
 let lastDragPosition = null  // Dernière position du glissement
 let isResizing3D = false     // Flag pour indiquer si on est en mode redimensionnement
@@ -280,7 +418,7 @@ const setupClickHandler = () => {
   
   // Créer le raycaster pour détecter les intersections
   raycaster3D = new THREE.Raycaster()
-  const mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
+  mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
   
   const getCanvasCoords = (event) => {
     if (!currentMesh || !props.canvas2D || !raycaster3D) return null
@@ -297,8 +435,32 @@ const setupClickHandler = () => {
     if (intersects.length > 0) {
       const intersection = intersects[0]
       if (intersection.uv) {
-        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
-        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+        // IMPORTANT: Utiliser les dimensions de la texture car c'est ce qui est réellement appliqué
+        // La texture peut avoir des dimensions différentes du canvas HTML à cause du devicePixelRatio
+        let canvasWidth = props.canvas2D.width || 800
+        let canvasHeight = props.canvas2D.height || 600
+        
+        // Si une texture existe, utiliser ses dimensions car c'est ce qui est réellement mappé sur le modèle 3D
+        if (canvasTexture && canvasTexture.image) {
+          const textureWidth = canvasTexture.image.width
+          const textureHeight = canvasTexture.image.height
+          
+          // Les dimensions de la texture sont les dimensions réelles utilisées pour le mapping UV
+          canvasWidth = textureWidth
+          canvasHeight = textureHeight
+          
+          // Log si les dimensions diffèrent pour déboguer
+          if (textureWidth !== props.canvas2D.width || textureHeight !== props.canvas2D.height) {
+            console.log('📐 Utilisation des dimensions de la texture:', {
+              canvasHTML: { width: props.canvas2D.width, height: props.canvas2D.height },
+              texture: { width: textureWidth, height: textureHeight },
+              devicePixelRatio: window.devicePixelRatio || 1
+            })
+          }
+        }
+        
+        // Utiliser les dimensions de la texture pour la projection
+        // car c'est ce qui correspond au mapping UV réel sur le modèle 3D
         const canvasCoords = project3DClickToCanvas(
           intersection,
           canvasWidth,
@@ -306,6 +468,7 @@ const setupClickHandler = () => {
           props.workZoneTop,
           props.workZoneBottom
         )
+        
         return canvasCoords
       }
     }
@@ -337,6 +500,76 @@ const setupClickHandler = () => {
   const onMouseMove = (event) => {
     // Toujours calculer les coordonnées une seule fois
     const canvasCoords = getCanvasCoords(event)
+    
+    // Calculer aussi les coordonnées 3D pour l'affichage
+    if (canvasCoords !== null && currentMesh && props.canvas2D && raycaster3D) {
+      const rect = canvasElement.value.getBoundingClientRect()
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      
+      raycaster3D.setFromCamera(mouse, camera)
+      const targetObject = activeMesh || currentMesh
+      const intersects = raycaster3D.intersectObject(targetObject, true)
+      
+      if (intersects.length > 0 && intersects[0].uv) {
+        const intersection = intersects[0]
+        
+        // Log de débogage pour vérifier les dimensions
+        const canvasWidth = props.canvas2D.width || 800
+        const canvasHeight = props.canvas2D.height || 600
+        const textureWidth = canvasTexture?.image?.width || canvasWidth
+        const textureHeight = canvasTexture?.image?.height || canvasHeight
+        
+        coordinatesDisplay.value = {
+          show: true,
+          uvU: intersection.uv.x,
+          uvV: intersection.uv.y,
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y,
+          worldPos: {
+            x: intersection.point.x,
+            y: intersection.point.y,
+            z: intersection.point.z
+          }
+        }
+        
+        // Log périodique pour déboguer (seulement toutes les 30 frames pour ne pas surcharger)
+        if (Math.random() < 0.033) {
+          const activeZoneTop = props.workZoneTop
+          const activeZoneBottom = 1 - props.workZoneBottom
+          const activeZoneHeight = activeZoneBottom - activeZoneTop
+          const normalizedV = (intersection.uv.y - activeZoneTop) / activeZoneHeight
+          
+          console.log('🔍 Debug coordonnées détaillées:', {
+            uv: { 
+              u: intersection.uv.x.toFixed(4), 
+              v: intersection.uv.y.toFixed(4),
+              raw: { u: intersection.uv.x, v: intersection.uv.y }
+            },
+            canvas: { width: canvasWidth, height: canvasHeight },
+            texture: { width: textureWidth, height: textureHeight },
+            workZones: { 
+              top: props.workZoneTop.toFixed(4), 
+              bottom: props.workZoneBottom.toFixed(4),
+              activeZoneTop: activeZoneTop.toFixed(4),
+              activeZoneBottom: activeZoneBottom.toFixed(4),
+              activeZoneHeight: activeZoneHeight.toFixed(4)
+            },
+            normalizedV: normalizedV.toFixed(4),
+            coords: { 
+              x: canvasCoords.x.toFixed(2), 
+              y: canvasCoords.y.toFixed(2),
+              calculatedX: (intersection.uv.x * canvasWidth).toFixed(2),
+              calculatedY: (normalizedV * canvasHeight).toFixed(2)
+            }
+          })
+        }
+      } else {
+        coordinatesDisplay.value.show = false
+      }
+    } else {
+      coordinatesDisplay.value.show = false
+    }
     
     // Toujours émettre l'événement hover pour détecter les bords et changer le curseur
     if (canvasCoords !== null) {
@@ -404,8 +637,9 @@ const setupClickHandler = () => {
   }
   
   const onCanvasClick = (event) => {
-    // Si on est en mode drag, ne pas gérer les clics simples
-    if (props.dragMode && isDragging3D) return
+    // Si on est en train de glisser activement, ne pas gérer les clics simples
+    // (pour éviter de sélectionner pendant un drag)
+    if (isDragging3D || isResizing3D) return
     
     if (!currentMesh || !props.canvas2D || !raycaster3D) return
     
@@ -438,8 +672,29 @@ const setupClickHandler = () => {
       // Vérifier si l'intersection a des UVs
       if (intersection.uv) {
         // Convertir le clic 3D en coordonnées canvas 2D avec zone de travail
-        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
-        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+        // IMPORTANT: Utiliser les dimensions de la texture car c'est ce qui est réellement mappé
+        let canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+        let canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+        
+        // Si une texture existe, utiliser ses dimensions (peut différer à cause du devicePixelRatio)
+        if (canvasTexture && canvasTexture.image) {
+          canvasWidth = canvasTexture.image.width
+          canvasHeight = canvasTexture.image.height
+        }
+        
+        // Log pour déboguer
+        console.log('🎯 Clic 3D - Calcul des coordonnées:', {
+          uv: { u: intersection.uv.x.toFixed(4), v: intersection.uv.y.toFixed(4) },
+          canvasHTML: props.canvas2D ? { width: props.canvas2D.width, height: props.canvas2D.height } : null,
+          texture: canvasTexture?.image ? {
+            width: canvasTexture.image.width,
+            height: canvasTexture.image.height
+          } : null,
+          finalDimensions: { width: canvasWidth, height: canvasHeight },
+          workZones: { top: props.workZoneTop.toFixed(4), bottom: props.workZoneBottom.toFixed(4) },
+          devicePixelRatio: window.devicePixelRatio || 1
+        })
+        
         const canvasCoords = project3DClickToCanvas(
           intersection,
           canvasWidth,
@@ -447,6 +702,24 @@ const setupClickHandler = () => {
           props.workZoneTop,
           props.workZoneBottom
         )
+        
+        if (canvasCoords) {
+          const activeZoneTop = props.workZoneTop
+          const activeZoneBottom = 1 - props.workZoneBottom
+          const activeZoneHeight = activeZoneBottom - activeZoneTop
+          const normalizedV = (intersection.uv.y - activeZoneTop) / activeZoneHeight
+          
+          console.log('📍 Coordonnées calculées:', {
+            x: canvasCoords.x.toFixed(2),
+            y: canvasCoords.y.toFixed(2),
+            activeZoneTop: activeZoneTop.toFixed(4),
+            activeZoneBottom: activeZoneBottom.toFixed(4),
+            activeZoneHeight: activeZoneHeight.toFixed(4),
+            normalizedV: normalizedV.toFixed(4),
+            calculatedX: (intersection.uv.x * canvasWidth).toFixed(2),
+            calculatedY: (normalizedV * canvasHeight).toFixed(2)
+          })
+        }
         
         if (canvasCoords !== null) {
           // Si on est en mode placement, émettre l'événement pour placer l'élément
@@ -501,8 +774,10 @@ const setupClickHandler = () => {
             
             const newIntersects = raycaster3D.intersectObject(targetObject, true)
             if (newIntersects.length > 0 && newIntersects[0].uv) {
+              // IMPORTANT: Toujours utiliser les dimensions RÉELLES du canvas HTML
               const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
               const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+              
               const newCanvasCoords = project3DClickToCanvas(
                 newIntersects[0],
                 canvasWidth,
@@ -679,8 +954,9 @@ const loadModel = async (url) => {
       throw new Error('Le modèle a une taille invalide. Impossible de le charger.')
     }
 
-    // Scale to fit in view
-    const scale = 3 / maxDim
+    // Scale to fit in view - Réduire la taille pour mieux correspondre au canvas 2D
+    // Facteur réduit de 3 à 2.2 pour diminuer la taille du gobelet
+    const scale = 2.2 / maxDim
     obj.scale.multiplyScalar(scale)
 
     // Center the model
@@ -719,14 +995,19 @@ const loadModel = async (url) => {
     scene.add(obj)
     currentMesh = obj
 
-    // Adjust camera
+    // Adjust camera - position fixe pour avoir des coordonnées stables
+    // Distance ajustée pour correspondre à la nouvelle taille du modèle
     const scaledMaxDim = maxDim * scale
-    const distance = scaledMaxDim * 2
+    const distance = scaledMaxDim * 0.7  // Distance augmentée pour voir le modèle plus petit et mieux aligné
     camera.position.set(distance, distance, distance)
     camera.lookAt(0, 0, 0)
     
     if (controls) {
       controls.target.set(0, 0, 0)
+      // S'assurer que les contrôles restent configurés après le chargement
+      controls.enableZoom = false      // Pas de zoom pour coordonnées fixes
+      controls.enablePan = false       // Pas de déplacement pour coordonnées fixes
+      controls.enableRotate = true    // Rotation activée pour voir le modèle sous différents angles
       controls.update()
     }
 
@@ -786,6 +1067,12 @@ const setupSharedCanvasTexture = (htmlCanvas) => {
       }
     })
 
+    // Si une texture existe déjà, la supprimer avant d'en créer une nouvelle
+    if (canvasTexture) {
+      canvasTexture.dispose()
+      canvasTexture = null
+    }
+    
     // Créer et configurer la texture
     canvasTexture = setupCanvasTexture(htmlCanvas, materials)
     
@@ -802,8 +1089,14 @@ const setupSharedCanvasTexture = (htmlCanvas) => {
     console.log('✅ Texture partagée configurée avec succès', {
       canvasWidth: htmlCanvas.width,
       canvasHeight: htmlCanvas.height,
+      canvasOffsetWidth: htmlCanvas.offsetWidth,
+      canvasOffsetHeight: htmlCanvas.offsetHeight,
       texture: !!canvasTexture,
       textureImage: !!canvasTexture.image,
+      textureWidth: canvasTexture?.image?.width,
+      textureHeight: canvasTexture?.image?.height,
+      workZoneTop: props.workZoneTop,
+      workZoneBottom: props.workZoneBottom,
       materialCount: materials.length
     })
   } catch (error) {
@@ -1229,6 +1522,87 @@ const setDragState = (dragging) => {
   }
 }
 
+/**
+ * Met à jour les coordonnées de l'objet sélectionné pour l'affichage
+ * 
+ * @param {fabric.Object|null} obj - L'objet sélectionné ou null
+ */
+const updateSelectedObjectCoords = (obj) => {
+  if (!obj) {
+    selectedObjectCoords.value.show = false
+    return
+  }
+  
+  // Calculer les dimensions réelles avec le scale
+  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  
+  selectedObjectCoords.value = {
+    show: true,
+    type: obj.type || 'unknown',
+    left: obj.left || 0,
+    top: obj.top || 0,
+    width: objWidth,
+    height: objHeight,
+    scaleX: obj.scaleX || 1,
+    scaleY: obj.scaleY || 1,
+    angle: obj.angle || 0
+  }
+}
+
+/**
+ * Met à jour la liste de tous les objets du canvas
+ */
+const updateAllObjectsList = () => {
+  if (!props.canvas2D) {
+    allObjectsList.value = []
+    return
+  }
+  
+  // Récupérer le canvas Fabric.js depuis le canvas HTML
+  // On doit accéder au canvas via DesignStudio
+  // Pour l'instant, on va utiliser une approche différente
+  // On va écouter les événements depuis DesignStudio
+  allObjectsList.value = []
+}
+
+/**
+ * Met à jour la liste de tous les objets depuis le canvas Fabric.js
+ * Cette fonction sera appelée depuis DesignStudio
+ */
+const updateObjectsListFromCanvas = (objects) => {
+  if (!objects || !Array.isArray(objects)) {
+    allObjectsList.value = []
+    return
+  }
+  
+  // Identifier l'objet sélectionné pour le marquer
+  const selectedObj = props.selectedObject
+  
+  allObjectsList.value = objects
+    .filter(obj => !obj.userData?.isWorkZoneIndicator)
+    .map((obj, index) => {
+      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+      
+      // Vérifier si cet objet est sélectionné
+      const isSelected = selectedObj && (
+        (obj.id && selectedObj.id && obj.id === selectedObj.id) ||
+        obj === selectedObj
+      )
+      
+      return {
+        id: obj.id || `obj-${index}`,
+        type: obj.type || 'unknown',
+        left: obj.left || 0,
+        top: obj.top || 0,
+        width: objWidth,
+        height: objHeight,
+        isSelected: isSelected
+      }
+    })
+}
+
 // Expose methods for parent component
 defineExpose({
   getCurrentMesh: () => currentMesh,
@@ -1248,6 +1622,8 @@ defineExpose({
   setDragMode,
   setResizing,
   setDragState,
+  updateSelectedObjectCoords,
+  updateObjectsListFromCanvas,
   renderer,
   emit
 })
@@ -1264,6 +1640,191 @@ defineExpose({
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.coordinates-display {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 250px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.selected-object-coords {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(79, 70, 229, 0.9);
+  border: 2px solid #4f46e5;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 250px;
+  height: 125px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.selected-object-coords .coord-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.all-objects-list {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(16, 185, 129, 0.9);
+  border: 2px solid #10b981;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 320px;
+  height: 100px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+}
+
+.all-objects-list .coord-title {
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.objects-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-right: 4px;
+}
+
+.objects-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.objects-scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.objects-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.objects-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.object-item {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s;
+}
+
+.object-item.selected {
+  background: rgba(255, 255, 255, 0.2);
+  border-left-color: #fff;
+}
+
+.object-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.object-type {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.selected-badge {
+  background: #fff;
+  color: #10b981;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.object-details {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.object-detail-row {
+  margin: 2px 0;
+}
+
+.object-detail-row span {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.coord-title {
+  font-weight: bold;
+  margin-bottom: 8px;
+  color: #4f46e5;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  padding-bottom: 6px;
+}
+
+.selected-object-coords .coord-title {
+  color: #fff;
+}
+
+.coord-section {
+  margin: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.coord-label {
+  font-size: 11px;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.selected-object-coords .coord-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.coord-value {
+  font-size: 12px;
+  color: #fff;
+  font-weight: 500;
 }
 </style>
 

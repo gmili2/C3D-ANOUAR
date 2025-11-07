@@ -299,9 +299,9 @@ watch(() => props.texture, (newTexture) => {
 const initScene = () => {
   if (!canvasElement.value) return
 
-  // Créer la scène avec un fond sombre
+  // Créer la scène avec un fond beige clair
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x1a1a1a)
+  scene.background = new THREE.Color(0xf4e8d8)
 
   // Obtenir les dimensions du canvas
   const width = canvasElement.value.clientWidth || 800

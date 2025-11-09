@@ -13,6 +13,12 @@
   - Gestion des zones de travail (exclusion de zones haut/bas)
 -->
 <template>
+  <span class="bg-red-500 text-white p-2 rounded">
+    Éléments sur le canvas: {{ canvasObjects.length }}
+    <span v-if="canvasObjects.length > 0" class="ml-2">
+      ({{ canvasObjects.map(obj => obj.type).join(', ') }})
+    </span>
+  </span>
   <div class="design-studio">
     <!-- En-tête avec les actions principales -->
     <div class="studio-header">
@@ -228,6 +234,7 @@ const fabricCanvasElement = ref(null)        // Référence au canvas HTML Fabri
 const showMeshSelector = ref(false)          // Afficher/masquer le sélecteur de meshes
 const modelMeshes = ref([])                  // Liste de tous les meshes du modèle 3D
 const selectedMesh = ref(null)               // Mesh actuellement sélectionné
+const canvasObjects = ref([])                // Liste de tous les objets sur le canvas Fabric
 
 // ===== CONFIGURATION DES ZONES DE TRAVAIL =====
 // Ces valeurs définissent les zones du canvas où on ne peut pas placer d'éléments
@@ -541,6 +548,10 @@ const on3DClickForPlacement = (clickData) => {
     if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
       fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
       // Le mode placement sera désactivé automatiquement par placeElementAt
+      // Mettre à jour la liste des objets après placement
+      nextTick(() => {
+        updateAllObjectsList()
+      })
     }
     return
   }
@@ -678,6 +689,16 @@ const updateAllObjectsList = () => {
   
   const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
   
+  // Mettre à jour la liste locale pour l'affichage
+  canvasObjects.value = objects.map((obj, index) => ({
+    id: obj.id || `obj-${index}`,
+    type: obj.type || 'unknown',
+    left: obj.left || 0,
+    top: obj.top || 0,
+    width: (obj.width || (obj.radius ? obj.radius * 2 : 0)) * (obj.scaleX || 1),
+    height: (obj.height || (obj.radius ? obj.radius * 2 : 0)) * (obj.scaleY || 1)
+  }))
+  
   // Mettre à jour la liste dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.updateObjectsListFromCanvas) {
     threeSceneRef.value.updateObjectsListFromCanvas(objects)
@@ -687,6 +708,8 @@ const updateAllObjectsList = () => {
 const onMoveObject = (data) => {
   // Cette fonction peut être utilisée pour des actions supplémentaires
   console.log('Objet déplacé:', data)
+  // Mettre à jour la liste des objets après déplacement
+  updateAllObjectsList()
 }
 
 // Variables pour le redimensionnement

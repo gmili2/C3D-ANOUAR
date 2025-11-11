@@ -104,11 +104,11 @@ export const project3DClickToCanvas = (intersection, canvasWidth, canvasHeight, 
   // Étape 1: Extraire les coordonnées UV de l'intersection
   const uv = getUVFromIntersection(intersection)
   if (!uv) {
-    console.warn('Impossible d\'obtenir les UVs de l\'intersection')
     return null
   }
 
   // Étape 2: Convertir les UVs en coordonnées canvas 2D
+
   return UVToCanvasCoords(uv, canvasWidth, canvasHeight, workZoneTop, workZoneBottom)
 }
 

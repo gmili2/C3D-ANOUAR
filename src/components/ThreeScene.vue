@@ -23,7 +23,8 @@
       :camera="camera"
     />
     <!-- Affichage des coordonnées en temps réel -->
-    <div v-if="coordinatesDisplay.show" class="coordinates-display">
+    <div v-if="coordinatesDisplay.show" 
+         :class="['coordinates-display', { 'on-seam': isOnSeam }]">
       <div class="coord-title">📍 Coordonnées Curseur</div>
       <div class="coord-section">
         <div class="coord-label">3D (UV):</div>
@@ -112,6 +113,33 @@
         </div>
       </div>
     </div>
+    
+    <!-- Liste des meshes de l'objet -->
+    <div v-if="meshesList.length > 0" class="coordinates-display meshes-list">
+      <div class="coord-title">🔷 Meshes de l'Objet ({{ meshesList.length }})</div>
+      <div class="meshes-scroll-container">
+        <div 
+          v-for="(meshInfo, index) in meshesList" 
+          :key="index"
+          class="mesh-item"
+          :class="{ 'active': activeMeshIndex === index }"
+          @click="selectMesh(index)"
+        >
+          <div class="mesh-header">
+            <span class="mesh-name">{{ meshInfo.name || `Mesh ${index + 1}` }}</span>
+            <span v-if="activeMeshIndex === index" class="active-badge">✓</span>
+          </div>
+          <div class="mesh-details">
+            <div class="mesh-detail-row">
+              <span>Sommets:</span> {{ meshInfo.vertexCount }}
+            </div>
+            <div class="mesh-detail-row">
+              <span>UVs:</span> {{ meshInfo.hasUVs ? 'Oui' : 'Non' }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -123,19 +151,22 @@
  * avec le modèle 3D, incluant la conversion des coordonnées 3D vers 2D.
  */
 
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { setupCanvasTexture, applyTextureToMesh, useCanvasTextureStore } from '../composables/useCanvasTexture'
 import { project3DClickToCanvas } from '../composables/use3DTo2DProjection'
 import TextureUpdater from './TextureUpdater.vue'
+import { log } from 'three'
 
 // ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
   modelUrl: {
     type: [String, File],
-    default: null  // URL (String) ou fichier (File) du modèle OBJ à charger
+    default: null  // URL (String) ou fichier (File) du modèle 3D à charger (.obj, .glb, .gltf)
   },
   texture: {
     type: THREE.Texture,
@@ -192,35 +223,53 @@ const emit = defineEmits([
   '3d-hover'           // Survol du modèle 3D (pour détecter les bords)
 ])
 
-// ===== ÉTAT INTERNE =====
+// ============================================================================
+// SECTION 1 : ÉTAT INTERNE & VARIABLES
+// ============================================================================
+
+// ----- Meshes & Modèles -----
 let allMeshes = []           // Tous les meshes du modèle
 let activeMesh = null        // Mesh actuellement actif pour l'édition
 let highlightedMesh = null   // Mesh actuellement mis en évidence
+let currentMesh = null       // Modèle 3D actuellement chargé
 
-// ===== RÉFÉRENCES VUE =====
+// ----- Textures & Environnement -----
+let environmentMap = null    // Texture d'environnement pour les réflexions
+let canvasTexture = null     // Texture partagée du canvas 2D (Fabric.js)
+
+// ----- Références Vue -----
 const canvasElement = ref(null)      // Référence au canvas HTML
 const textureUpdaterRef = ref(null)  // Référence au composant TextureUpdater
 
-// ===== VARIABLES THREE.JS =====
+// ----- Variables Three.js -----
 let scene = null          // Scène Three.js
 let camera = null         // Caméra perspective
 let renderer = null       // Rendu WebGL
 let controls = null       // Contrôles OrbitControls (rotation, zoom, pan)
-let currentMesh = null    // Modèle 3D actuellement chargé
-let animationId = null    // ID de l'animation frame pour cleanup
+let animationId = null   // ID de l'animation frame pour cleanup
 let handleResize = null   // Handler pour le redimensionnement
-let canvasTexture = null  // Texture partagée du canvas 2D (Fabric.js)
 
-// ===== AFFICHAGE DES COORDONNÉES =====
+// ============================================================================
+// SECTION 2 : AFFICHAGE & UI (Coordonnées et Informations)
+// ============================================================================
+
+// ----- Coordonnées du Curseur -----
 const coordinatesDisplay = ref({
   show: false,
   uvU: 0,
   uvV: 0,
   canvasX: 0,
   canvasY: 0,
-  worldPos: null
+  worldPos: null,
+  isOnSeam: false // Flag pour indiquer si le curseur est sur la couture
 })
 
+// Computed pour vérifier si on est sur la couture
+const isOnSeam = computed(() => {
+  return coordinatesDisplay.value.isOnSeam || false
+})
+
+// ----- Coordonnées de l'Objet Sélectionné -----
 const selectedObjectCoords = ref({
   show: false,
   type: '',
@@ -233,11 +282,103 @@ const selectedObjectCoords = ref({
   angle: 0
 })
 
+// ----- Liste de Tous les Objets -----
 const allObjectsList = ref([])
+
+// ----- Liste des Meshes -----
+const meshesList = ref([])
+const activeMeshIndex = ref(-1)
+
+// ============================================================================
+// SECTION 3 : INITIALISATION & CONFIGURATION
+// ============================================================================
+
+/**
+ * Charge une texture d'environnement équirectangulaire
+ * Utilise une texture générée par défaut si aucune URL n'est fournie
+ * 
+ * @param {string|null} url - URL de la texture d'environnement (optionnel)
+ */
+const loadEnvironmentMap = async (url = null) => {
+  const loader = new THREE.TextureLoader()
+  
+  try {
+    if (url) {
+      // Charger depuis une URL
+      environmentMap = await new Promise((resolve, reject) => {
+        loader.load(
+          url,
+          (texture) => {
+            texture.mapping = THREE.EquirectangularReflectionMapping
+            texture.needsUpdate = true
+            resolve(texture)
+          },
+          undefined,
+          (error) => reject(error)
+        )
+      })
+    } else {
+      // Créer une texture d'environnement simple (dégradé bleu-blanc)
+      const envCanvas = document.createElement('canvas')
+      envCanvas.width = 2048 // Format 2:1 pour équirectangulaire
+      envCanvas.height = 1024
+      const ctx = envCanvas.getContext('2d')
+      
+      // Créer un dégradé simple (ciel bleu)
+      const gradient = ctx.createLinearGradient(0, 0, 0, envCanvas.height)
+      gradient.addColorStop(0, '#87CEEB') // Bleu ciel en haut
+      gradient.addColorStop(0.5, '#E0F6FF') // Bleu clair au milieu
+      gradient.addColorStop(1, '#FFFFFF') // Blanc en bas
+      
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, envCanvas.width, envCanvas.height)
+      
+      // Ajouter quelques nuages simples
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+      for (let i = 0; i < 5; i++) {
+        const x = (envCanvas.width / 5) * i + 200
+        const y = 200 + Math.sin(i) * 50
+        ctx.beginPath()
+        ctx.arc(x, y, 150, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      
+      environmentMap = new THREE.CanvasTexture(envCanvas)
+      environmentMap.mapping = THREE.EquirectangularReflectionMapping
+      environmentMap.needsUpdate = true
+    }
+    
+    // Appliquer la texture d'environnement à tous les meshes existants
+    if (currentMesh) {
+      currentMesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat instanceof THREE.MeshStandardMaterial) {
+                mat.envMap = environmentMap
+                mat.needsUpdate = true
+              }
+            })
+          } else {
+            if (child.material instanceof THREE.MeshStandardMaterial) {
+              child.material.envMap = environmentMap
+              child.material.needsUpdate = true
+            }
+          }
+        }
+      })
+    }
+    
+  } catch (error) {
+  }
+}
 
 onMounted(async () => {
   await nextTick()
   initScene()
+  
+  // Charger la texture d'environnement
+  await loadEnvironmentMap()
   
   // Si un canvas 2D est fourni, configurer la texture partagée
   if (props.canvas2D) {
@@ -264,10 +405,6 @@ watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
     const newHeight = newCanvas.height || 0
     
     if (oldWidth !== newWidth || oldHeight !== newHeight) {
-      console.log('📐 Dimensions du canvas changées:', {
-        old: { width: oldWidth, height: oldHeight },
-        new: { width: newWidth, height: newHeight }
-      })
     }
     
     setupSharedCanvasTexture(newCanvas)
@@ -310,7 +447,7 @@ const initScene = () => {
   // Créer la caméra perspective
   // FOV: 75°, ratio d'aspect, near: 0.1, far: 1000
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
-  camera.position.set(0, 0, 5)  // Position initiale de la caméra
+  camera.position.set(0, 0, 3.5)  // Position initiale de la caméra (zoomé)
 
   // Créer le renderer WebGL avec antialiasing
   renderer = new THREE.WebGLRenderer({
@@ -404,19 +541,29 @@ const initScene = () => {
 }
 
 // ===== VARIABLES POUR LES INTERACTIONS =====
+// ============================================================================
+// SECTION 4 : INTERACTIONS 3D (Clic, Drag, Resize)
+// ============================================================================
+
+// ----- Variables d'État pour les Interactions -----
 let raycaster3D = null        // Raycaster pour détecter les clics sur le modèle 3D
 let mouse = null              // Coordonnées de la souris normalisées (-1 à 1)
 let isDragging3D = false      // Indique si on est en train de glisser
-let lastDragPosition = null  // Dernière position du glissement
-let isResizing3D = false     // Flag pour indiquer si on est en mode redimensionnement
+let lastDragPosition = null   // Dernière position du glissement
+let isResizing3D = false      // Flag pour indiquer si on est en mode redimensionnement
 let resizeStartPosition = null // Position de départ du redimensionnement
-let resizeHandleInfo = null   // Informations sur le handle utilisé pour le redimensionnement
+let resizeHandleInfo = null    // Informations sur le handle utilisé pour le redimensionnement
 
 /**
  * Configure les handlers pour les interactions (clic, drag, molette)
  * 
  * Utilise un raycaster pour convertir les coordonnées de la souris
  * en coordonnées 3D et détecter les intersections avec le modèle.
+ * 
+ * Cette fonction configure :
+ * - Les handlers de clic (onCanvasClick)
+ * - Les handlers de mouvement (onMouseMove)
+ * - Les handlers de molette (onMouseWheel)
  */
 const setupClickHandler = () => {
   if (!renderer || !canvasElement.value || raycaster3D) return
@@ -456,11 +603,6 @@ const setupClickHandler = () => {
           
           // Log si les dimensions diffèrent pour déboguer
           if (textureWidth !== props.canvas2D.width || textureHeight !== props.canvas2D.height) {
-            console.log('📐 Utilisation des dimensions de la texture:', {
-              canvasHTML: { width: props.canvas2D.width, height: props.canvas2D.height },
-              texture: { width: textureWidth, height: textureHeight },
-              devicePixelRatio: window.devicePixelRatio || 1
-            })
           }
         }
         
@@ -525,12 +667,18 @@ const setupClickHandler = () => {
         const textureWidth = canvasTexture?.image?.width || canvasWidth
         const textureHeight = canvasTexture?.image?.height || canvasHeight
         
+        // Détecter si on est sur la couture (U proche de 0 ou 1)
+        const uvU = intersection.uv.x
+        const seamThreshold = 0.01 // Tolérance de 1% pour détecter la couture
+        const isOnSeamValue = uvU < seamThreshold || uvU > (1 - seamThreshold)
+        
         coordinatesDisplay.value = {
           show: true,
-          uvU: intersection.uv.x,
+          uvU: uvU,
           uvV: intersection.uv.y,
           canvasX: canvasCoords.x,
           canvasY: canvasCoords.y,
+          isOnSeam: isOnSeamValue, // Flag pour indiquer si on est sur la couture
           worldPos: {
             x: intersection.point.x,
             y: intersection.point.y,
@@ -545,29 +693,6 @@ const setupClickHandler = () => {
           const activeZoneHeight = activeZoneBottom - activeZoneTop
           const normalizedV = (intersection.uv.y - activeZoneTop) / activeZoneHeight
           
-          console.log('🔍 Debug coordonnées détaillées:', {
-            uv: { 
-              u: intersection.uv.x.toFixed(4), 
-              v: intersection.uv.y.toFixed(4),
-              raw: { u: intersection.uv.x, v: intersection.uv.y }
-            },
-            canvas: { width: canvasWidth, height: canvasHeight },
-            texture: { width: textureWidth, height: textureHeight },
-            workZones: { 
-              top: props.workZoneTop.toFixed(4), 
-              bottom: props.workZoneBottom.toFixed(4),
-              activeZoneTop: activeZoneTop.toFixed(4),
-              activeZoneBottom: activeZoneBottom.toFixed(4),
-              activeZoneHeight: activeZoneHeight.toFixed(4)
-            },
-            normalizedV: normalizedV.toFixed(4),
-            coords: { 
-              x: canvasCoords.x.toFixed(2), 
-              y: canvasCoords.y.toFixed(2),
-              calculatedX: (intersection.uv.x * canvasWidth).toFixed(2),
-              calculatedY: (normalizedV * canvasHeight).toFixed(2)
-            }
-          })
         }
       } else {
         coordinatesDisplay.value.show = false
@@ -668,11 +793,6 @@ const setupClickHandler = () => {
         clickedMesh = clickedMesh.parent
       }
       
-      console.log('🎯 Mesh cliqué:', {
-        meshName: clickedMesh?.name || 'Sans nom',
-        hasUVs: !!intersection.uv,
-        point: intersection.point
-      })
       
       // Vérifier si l'intersection a des UVs
       if (intersection.uv) {
@@ -688,17 +808,6 @@ const setupClickHandler = () => {
         }
         
         // Log pour déboguer
-        console.log('🎯 Clic 3D - Calcul des coordonnées:', {
-          uv: { u: intersection.uv.x.toFixed(4), v: intersection.uv.y.toFixed(4) },
-          canvasHTML: props.canvas2D ? { width: props.canvas2D.width, height: props.canvas2D.height } : null,
-          texture: canvasTexture?.image ? {
-            width: canvasTexture.image.width,
-            height: canvasTexture.image.height
-          } : null,
-          finalDimensions: { width: canvasWidth, height: canvasHeight },
-          workZones: { top: props.workZoneTop.toFixed(4), bottom: props.workZoneBottom.toFixed(4) },
-          devicePixelRatio: window.devicePixelRatio || 1
-        })
         
         const canvasCoords = project3DClickToCanvas(
           intersection,
@@ -714,16 +823,6 @@ const setupClickHandler = () => {
           const activeZoneHeight = activeZoneBottom - activeZoneTop
           const normalizedV = (intersection.uv.y - activeZoneTop) / activeZoneHeight
           
-          console.log('📍 Coordonnées calculées:', {
-            x: canvasCoords.x.toFixed(2),
-            y: canvasCoords.y.toFixed(2),
-            activeZoneTop: activeZoneTop.toFixed(4),
-            activeZoneBottom: activeZoneBottom.toFixed(4),
-            activeZoneHeight: activeZoneHeight.toFixed(4),
-            normalizedV: normalizedV.toFixed(4),
-            calculatedX: (intersection.uv.x * canvasWidth).toFixed(2),
-            calculatedY: (normalizedV * canvasHeight).toFixed(2)
-          })
         }
         
         if (canvasCoords !== null) {
@@ -748,17 +847,9 @@ const setupClickHandler = () => {
             })
           }
           
-          console.log('✅ Clic sur modèle 3D:', {
-            mesh: clickedMesh?.name || 'Sans nom',
-            worldPosition: intersection.point,
-            uv: intersection.uv,
-            canvasCoords: canvasCoords
-          })
         } else {
-          console.warn('⚠️ Impossible de projeter le clic sur le canvas')
         }
       } else {
-        console.warn('⚠️ L\'intersection n\'a pas de coordonnées UV. Génération des UVs...')
         // Essayer de générer les UVs si possible
         if (clickedMesh && clickedMesh.geometry) {
           // Générer les UVs pour tous les meshes du modèle si nécessaire
@@ -809,10 +900,8 @@ const setupClickHandler = () => {
                     mesh: clickedMesh
                   })
                 }
-                console.log('✅ UVs générées et clic projeté avec succès')
               }
             } else {
-              console.warn('⚠️ Les UVs ont été générées mais le raycaster ne les trouve toujours pas')
             }
           }, 200)
         }
@@ -859,7 +948,6 @@ const setupClickHandler = () => {
   // Stocker le handler pour cleanup
   window._threeSceneClickHandler = onCanvasClick
   
-  console.log('✅ Handler de clic 3D configuré')
 }
 
 const addHelperGeometry = () => {
@@ -873,11 +961,35 @@ const addHelperGeometry = () => {
   currentMesh = helperCube
 }
 
+/**
+ * Détermine le type de fichier à partir de l'URL ou du fichier
+ */
+const getFileType = (url) => {
+  if (url instanceof File) {
+    const fileName = url.name.toLowerCase()
+    if (fileName.endsWith('.glb') || fileName.endsWith('.gltf')) {
+      return 'gltf'
+    } else if (fileName.endsWith('.obj')) {
+      return 'obj'
+    }
+  } else if (typeof url === 'string') {
+    const urlLower = url.toLowerCase()
+    if (urlLower.endsWith('.glb') || urlLower.endsWith('.gltf')) {
+      return 'gltf'
+    } else if (urlLower.endsWith('.obj')) {
+      return 'obj'
+    }
+  }
+  // Par défaut, essayer OBJ pour la compatibilité
+  return 'obj'
+}
+
 const loadModel = async (url) => {
   if (!scene) return
 
   try {
     // Remove existing model
+    console.log('currentMesh', currentMesh)
     if (currentMesh) {
       scene.remove(currentMesh)
       if (currentMesh.geometry) currentMesh.geometry.dispose()
@@ -891,31 +1003,72 @@ const loadModel = async (url) => {
       currentMesh = null
     }
 
-    // Load OBJ
-    const loader = new OBJLoader()
-    
+    // Déterminer le type de fichier
+    const fileType = getFileType(url)
     let obj
-    if (url instanceof File) {
-      const text = await url.text()
-      obj = loader.parse(text)
-    } else if (typeof url === 'string') {
-      if (url.startsWith('data:')) {
-        // Data URL
-        const text = atob(url.split(',')[1])
-        obj = loader.parse(text)
+    
+    if (fileType === 'gltf') {
+      // Load GLB/GLTF
+      const gltfLoader = new GLTFLoader()
+      
+      // Configurer DRACOLoader pour la compression de mesh (optionnel)
+      // Si le fichier utilise DRACO, il sera décompressé automatiquement
+      const dracoLoader = new DRACOLoader()
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/')
+      gltfLoader.setDRACOLoader(dracoLoader)
+      
+      if (url instanceof File) {
+        // Charger depuis un fichier
+        const fileUrl = URL.createObjectURL(url)
+        const gltf = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            fileUrl,
+            (gltf) => resolve(gltf),
+            undefined,
+            (error) => reject(error)
+          )
+        })
+        URL.revokeObjectURL(fileUrl)
+        obj = gltf.scene
+      } else if (typeof url === 'string') {
+        // Charger depuis une URL
+        const gltf = await new Promise((resolve, reject) => {
+          gltfLoader.load(
+            url,
+            (gltf) => resolve(gltf),
+            undefined,
+            (error) => reject(error)
+          )
+        })
+        obj = gltf.scene
       } else {
-        // Regular URL - try to fetch
-        try {
-          const response = await fetch(url)
-          const text = await response.text()
-          obj = loader.parse(text)
-        } catch (error) {
-          console.error('Error fetching OBJ from URL:', error)
-          throw new Error('Impossible de charger le fichier OBJ depuis cette URL')
-        }
+        throw new Error('Format de fichier GLTF non supporté')
       }
     } else {
-      throw new Error('Format de fichier non supporté')
+      // Load OBJ
+      const objLoader = new OBJLoader()
+      
+      if (url instanceof File) {
+        const text = await url.text()
+        obj = objLoader.parse(text)
+      } else if (typeof url === 'string') {
+        if (url.startsWith('data:')) {
+          // Data URL
+          const text = atob(url.split(',')[1])
+          obj = objLoader.parse(text)
+        } else {
+          // Regular URL - try to fetch
+          try {
+            const response = await fetch(url)
+            const text = await response.text()
+            obj = objLoader.parse(text)
+          } catch (error) {
+            throw new Error('Impossible de charger le fichier OBJ depuis cette URL')
+          }
+        }
+      } else {
+        throw new Error('Format de fichier non supporté')
+      }
     }
 
     // Vérifier que le modèle ne contient pas de NaN dans les positions
@@ -930,7 +1083,6 @@ const loadModel = async (url) => {
             const z = positions.getZ(i)
             if (isNaN(x) || isNaN(y) || isNaN(z) || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
               hasInvalidGeometry = true
-              console.error(`❌ Position invalide trouvée dans le mesh "${child.name || 'sans nom'}":`, { x, y, z, index: i })
             }
           }
         }
@@ -938,7 +1090,7 @@ const loadModel = async (url) => {
     })
     
     if (hasInvalidGeometry) {
-      throw new Error('Le modèle contient des coordonnées invalides (NaN ou Infinity). Vérifiez le fichier OBJ.')
+      throw new Error('Le modèle contient des coordonnées invalides (NaN ou Infinity). Vérifiez le fichier 3D.')
     }
 
     // Calculate bounding box and center the model
@@ -949,7 +1101,7 @@ const loadModel = async (url) => {
     // Vérifier que la bounding box est valide
     if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
         isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
-      throw new Error('Le modèle contient des coordonnées invalides (NaN). Vérifiez le fichier OBJ.')
+      throw new Error('Le modèle contient des coordonnées invalides (NaN). Vérifiez le fichier 3D.')
     }
     
     const maxDim = Math.max(size.x, size.y, size.z)
@@ -975,7 +1127,6 @@ const loadModel = async (url) => {
       if (child instanceof THREE.Mesh) {
         // Ensure geometry has UVs - critical for textures!
         if (child.geometry && !child.geometry.attributes.uv) {
-          console.log('📐 Génération des UVs pour le mesh:', child.name || 'Mesh sans nom')
           generateUVs(child.geometry)
           generatedUVs = true
         }
@@ -985,8 +1136,11 @@ const loadModel = async (url) => {
             color: 0xffffff,
             side: THREE.DoubleSide,
             map: null, // Will be set when texture is applied
+            envMap: environmentMap, // Texture d'environnement pour les réflexions
             transparent: true, // Rendre le gobelet transparent
-            opacity: 0.3 // Niveau de transparence (0 = complètement transparent, 1 = opaque)
+            opacity: 0.3, // Niveau de transparence (0 = complètement transparent, 1 = opaque)
+            metalness: 0.3, // Légèrement métallique pour voir les réflexions
+            roughness: 0.7 // Surface légèrement rugueuse
           })
         } else {
           // S'assurer que le matériau existant est aussi transparent
@@ -994,10 +1148,20 @@ const loadModel = async (url) => {
             child.material.forEach(mat => {
               mat.transparent = true
               mat.opacity = 0.3
+              if (mat instanceof THREE.MeshStandardMaterial) {
+                mat.envMap = environmentMap
+                mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
+                mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
+              }
             })
           } else {
             child.material.transparent = true
             child.material.opacity = 0.3
+            if (child.material instanceof THREE.MeshStandardMaterial) {
+              child.material.envMap = environmentMap
+              child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
+              child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
+            }
           }
           if (!child.material.map) {
             // Ensure material can accept textures
@@ -1007,17 +1171,35 @@ const loadModel = async (url) => {
       }
     })
     
-    console.log('Modèle chargé avec matériaux et UVs configurés', {
-      generatedUVs: generatedUVs
-    })
 
     scene.add(obj)
     currentMesh = obj
+    
+    // S'assurer que la texture d'environnement est appliquée si elle existe
+    if (environmentMap) {
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat instanceof THREE.MeshStandardMaterial) {
+                mat.envMap = environmentMap
+                mat.needsUpdate = true
+              }
+            })
+          } else {
+            if (child.material instanceof THREE.MeshStandardMaterial) {
+              child.material.envMap = environmentMap
+              child.material.needsUpdate = true
+            }
+          }
+        }
+      })
+    }
 
     // Adjust camera - position fixe pour avoir des coordonnées stables
     // Distance ajustée pour correspondre à la nouvelle taille du modèle
     const scaledMaxDim = maxDim * scale
-    const distance = scaledMaxDim * 0.7  // Distance augmentée pour voir le modèle plus petit et mieux aligné
+    const distance = scaledMaxDim * 0.5  // Distance réduite pour zoomer le modèle (0.5 au lieu de 0.7)
     camera.position.set(distance, distance, distance)
     camera.lookAt(0, 0, 0)
     
@@ -1036,16 +1218,72 @@ const loadModel = async (url) => {
 
     // Extraire tous les meshes
     allMeshes = []
+    meshesList.value = []
+    let meshIndex = 0
+    console.log('🔍 [DEBUG] Extraction des meshes du modèle...')
     obj.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         allMeshes.push(child)
+        
+        // Ajouter les informations du mesh à la liste
+        const geometry = child.geometry
+        const vertexCount = geometry.attributes.position ? geometry.attributes.position.count : 0
+        const hasUVs = geometry.attributes.uv ? true : false
+        
+        // Analyser les UVs pour détecter la couture
+        let uvRange = null
+        if (hasUVs && geometry.attributes.uv) {
+          const uvArray = geometry.attributes.uv.array
+          let minU = Infinity
+          let maxU = -Infinity
+          for (let i = 0; i < uvArray.length; i += 2) {
+            const u = uvArray[i]
+            minU = Math.min(minU, u)
+            maxU = Math.max(maxU, u)
+          }
+          uvRange = { minU, maxU, range: maxU - minU }
+        }
+        
+        const meshInfo = {
+          index: meshIndex++,
+          mesh: child,
+          name: child.name || `Mesh_${meshIndex}`,
+          vertexCount: vertexCount,
+          hasUVs: hasUVs,
+          uvRange: uvRange
+        }
+        meshesList.value.push(meshInfo)
+        
+        console.log(`📦 [DEBUG] Mesh ${meshIndex} trouvé:`, {
+          name: meshInfo.name,
+          vertices: vertexCount,
+          hasUVs: hasUVs,
+          uvRange: uvRange,
+          material: child.material ? (Array.isArray(child.material) ? `${child.material.length} matériaux` : '1 matériau') : 'aucun',
+          hasTexture: child.material && (Array.isArray(child.material) 
+            ? child.material.some(m => m && m.map) 
+            : child.material.map)
+        })
+        
+        // Log détaillé sur les UVs pour comprendre la couture
+        if (uvRange) {
+          const hasSeam = uvRange.minU < 0.1 || uvRange.maxU > 0.9
+          console.log(`  🔍 [DEBUG] Analyse UVs du mesh ${meshIndex}:`, {
+            minU: uvRange.minU.toFixed(4),
+            maxU: uvRange.maxU.toFixed(4),
+            range: uvRange.range.toFixed(4),
+            hasSeam: hasSeam,
+            seamLocation: hasSeam ? (uvRange.minU < 0.1 ? 'U=0 (début)' : 'U=1 (fin)') : 'Aucune couture détectée',
+            note: hasSeam ? '⚠️ La couture est visible car les UVs vont de 0 à 1' : '✅ Pas de couture visible'
+          })
+        }
       }
     })
     
-    console.log(`✅ ${allMeshes.length} pièce(s) trouvée(s) dans le modèle`)
-    
+    console.log(`✅ [DEBUG] Total: ${allMeshes.length} mesh(es) trouvé(s)`)
     emit('model-loaded', obj)
     emit('meshes-extracted', allMeshes)
+    console.log('📋 [DEBUG] allMeshes array:', allMeshes) 
 
     // Si un canvas 2D est fourni, configurer la texture partagée
     // Attendre un peu pour s'assurer que tout est prêt
@@ -1058,7 +1296,6 @@ const loadModel = async (url) => {
       applyTexture(props.texture)
     }
   } catch (error) {
-    console.error('Error loading model:', error)
     emit('model-error', error)
   }
 }
@@ -1068,62 +1305,250 @@ const loadModel = async (url) => {
  */
 const setupSharedCanvasTexture = (htmlCanvas) => {
   if (!htmlCanvas || !currentMesh) {
-    console.warn('Canvas HTML ou mesh manquant pour la texture partagée')
+    console.warn('⚠️ [DEBUG] setupSharedCanvasTexture: htmlCanvas ou currentMesh manquant', {
+      hasCanvas: !!htmlCanvas,
+      hasMesh: !!currentMesh,
+      canvasSize: htmlCanvas ? `${htmlCanvas.width}x${htmlCanvas.height}` : 'N/A'
+    })
     return
   }
 
   try {
+    console.log('🎨 [DEBUG] setupSharedCanvasTexture - Début')
+    console.log('📐 [DEBUG] Canvas dimensions:', {
+      width: htmlCanvas.width,
+      height: htmlCanvas.height,
+      clientWidth: htmlCanvas.clientWidth,
+      clientHeight: htmlCanvas.clientHeight
+    })
+    
     // Récupérer tous les matériaux du mesh
     const materials = []
+    let meshCount = 0
     currentMesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
+        meshCount++
+        console.log(`🔷 [DEBUG] Traitement mesh ${meshCount}:`, {
+          name: child.name || `Mesh_${meshCount}`,
+          hasGeometry: !!child.geometry,
+          hasUVs: child.geometry && !!child.geometry.attributes.uv,
+          materialType: Array.isArray(child.material) ? 'Array' : typeof child.material,
+          materialCount: Array.isArray(child.material) ? child.material.length : 1
+        })
+        
         // Assurer les UVs
         if (child.geometry && !child.geometry.attributes.uv) {
+          console.log(`  ⚠️ [DEBUG] Génération des UVs pour mesh ${meshCount}`)
           generateUVs(child.geometry)
         }
         
         if (Array.isArray(child.material)) {
+          console.log(`  📦 [DEBUG] Mesh ${meshCount} a ${child.material.length} matériaux`)
           materials.push(...child.material)
         } else if (child.material) {
+          console.log(`  📦 [DEBUG] Mesh ${meshCount} a 1 matériau`)
           materials.push(child.material)
         }
       }
     })
+    
+    console.log(`📊 [DEBUG] Total: ${meshCount} mesh(es), ${materials.length} matériau(x) à traiter`)
 
     // Si une texture existe déjà, la supprimer avant d'en créer une nouvelle
     if (canvasTexture) {
+      console.log('🗑️ [DEBUG] Suppression de l\'ancienne texture')
       canvasTexture.dispose()
       canvasTexture = null
     }
     
     // Créer et configurer la texture
+    console.log('🖼️ [DEBUG] Création de la texture depuis le canvas...')
     canvasTexture = setupCanvasTexture(htmlCanvas, materials)
     
     if (!canvasTexture) {
-      console.error('❌ Échec de la création de la texture')
+      console.error('❌ [DEBUG] Échec de la création de la texture')
       return
     }
     
+    console.log('✅ [DEBUG] Texture créée:', {
+      width: canvasTexture.image?.width || 'N/A',
+      height: canvasTexture.image?.height || 'N/A',
+      format: canvasTexture.format,
+      wrapS: canvasTexture.wrapS,
+      wrapT: canvasTexture.wrapT,
+      wrapSName: canvasTexture.wrapS === THREE.ClampToEdgeWrapping ? 'ClampToEdge' : 
+                  canvasTexture.wrapS === THREE.RepeatWrapping ? 'Repeat' : 
+                  canvasTexture.wrapS === THREE.MirroredRepeatWrapping ? 'MirroredRepeat' : 'Unknown',
+      wrapTName: canvasTexture.wrapT === THREE.ClampToEdgeWrapping ? 'ClampToEdge' : 
+                  canvasTexture.wrapT === THREE.RepeatWrapping ? 'Repeat' : 
+                  canvasTexture.wrapT === THREE.MirroredRepeatWrapping ? 'MirroredRepeat' : 'Unknown'
+    })
+    
+    // Vérifier les UVs de tous les meshes après création de la texture
+    console.log('🔍 [DEBUG] Vérification des UVs après création de texture:')
+    currentMesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry && child.geometry.attributes.uv) {
+        const uvArray = child.geometry.attributes.uv.array
+        let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+        for (let i = 0; i < uvArray.length; i += 2) {
+          minU = Math.min(minU, uvArray[i])
+          maxU = Math.max(maxU, uvArray[i])
+          minV = Math.min(minV, uvArray[i + 1])
+          maxV = Math.max(maxV, uvArray[i + 1])
+        }
+        console.log(`  📐 Mesh "${child.name || 'Unnamed'}":`, {
+          U: `[${minU.toFixed(4)}, ${maxU.toFixed(4)}]`,
+          V: `[${minV.toFixed(4)}, ${maxV.toFixed(4)}]`,
+          seamAtU0: minU < 0.01,
+          seamAtU1: maxU > 0.99,
+          explanation: (minU < 0.01 || maxU > 0.99) 
+            ? '⚠️ Couture visible: Les UVs touchent les bords (U=0 ou U=1)' 
+            : '✅ Pas de couture: Les UVs sont dans la plage 0.01-0.99'
+        })
+      }
+    })
+    
     // Appliquer sur tous les meshes
+    console.log('🔧 [DEBUG] Application de la texture sur tous les meshes...')
     applyTextureToMesh(currentMesh, canvasTexture)
     
-    emit('texture-ready', canvasTexture)
-    
-    console.log('✅ Texture partagée configurée avec succès', {
-      canvasWidth: htmlCanvas.width,
-      canvasHeight: htmlCanvas.height,
-      canvasOffsetWidth: htmlCanvas.offsetWidth,
-      canvasOffsetHeight: htmlCanvas.offsetHeight,
-      texture: !!canvasTexture,
-      textureImage: !!canvasTexture.image,
-      textureWidth: canvasTexture?.image?.width,
-      textureHeight: canvasTexture?.image?.height,
-      workZoneTop: props.workZoneTop,
-      workZoneBottom: props.workZoneBottom,
-      materialCount: materials.length
+    // Vérifier que la texture a bien été appliquée
+    let appliedCount = 0
+    currentMesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(mat => {
+            if (mat && mat.map === canvasTexture) {
+              appliedCount++
+            }
+          })
+        } else if (child.material && child.material.map === canvasTexture) {
+          appliedCount++
+        }
+      }
     })
+    console.log(`✅ [DEBUG] Texture appliquée sur ${appliedCount} matériau(x)`)
+    
+    emit('texture-ready', canvasTexture)
+    console.log('🎉 [DEBUG] setupSharedCanvasTexture - Terminé avec succès')
+    
   } catch (error) {
-    console.error('Erreur lors de la configuration de la texture partagée:', error)
+    console.error('❌ [DEBUG] Erreur dans setupSharedCanvasTexture:', error)
+  }
+}
+
+// ============================================================================
+// SECTION 5 : GÉNÉRATION D'UVs (Mapping Texture)
+// ============================================================================
+
+/**
+ * Génère des coordonnées UV sans couture pour une géométrie
+ * Les UVs sont étalés de 0.05 à 0.95 pour éviter la discontinuité à U=0/U=1
+ * 
+ * @param {THREE.BufferGeometry} geometry - La géométrie à traiter
+ * @param {boolean} seamless - Si true, étale les UVs pour éviter la couture
+ */
+const generateSeamlessUVs = (geometry, seamless = false) => {
+  const positions = geometry.attributes.position
+  const uvs = []
+  
+  if (!positions || positions.count === 0) {
+    return
+  }
+  
+  // Calculer la bounding box
+  const box = new THREE.Box3().setFromBufferAttribute(positions)
+  const size = box.getSize(new THREE.Vector3())
+  const center = box.getCenter(new THREE.Vector3())
+  
+  // Déterminer la meilleure projection
+  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8
+  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5
+  
+  // Facteur d'étalement pour éviter la couture (0.05 à 0.95 au lieu de 0 à 1)
+  const uMin = seamless ? 0.05 : 0
+  const uMax = seamless ? 0.95 : 1
+  const uRange = uMax - uMin
+  
+  if (isCylindrical) {
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i) - center.x
+      const y = positions.getY(i) - center.y
+      const z = positions.getZ(i) - center.z
+      
+      const angle = Math.atan2(z, x)
+      let u = 1 - ((angle / (2 * Math.PI)) + 0.5)
+      
+      // Étaler les UVs pour éviter la couture
+      if (seamless) {
+        u = uMin + (u * uRange)
+      }
+      
+      let v = size.y > 0 ? 1 - ((y + size.y / 2) / size.y) : 0.5
+      
+      if (isNaN(u) || !isFinite(u)) u = 0.5
+      if (isNaN(v) || !isFinite(v)) v = 0.5
+      
+      uvs.push(Math.max(0, Math.min(1, u)))
+      uvs.push(Math.max(0, Math.min(1, v)))
+    }
+  } else if (isWide) {
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i) - center.x
+      const z = positions.getZ(i) - center.z
+      
+      let u = size.x > 0 ? 1 - ((x + size.x / 2) / size.x) : 0.5
+      
+      // Étaler les UVs pour éviter la couture
+      if (seamless) {
+        u = uMin + (u * uRange)
+      }
+      
+      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5
+      
+      if (isNaN(u) || !isFinite(u)) u = 0.5
+      if (isNaN(v) || !isFinite(v)) v = 0.5
+      
+      uvs.push(Math.max(0, Math.min(1, u)))
+      uvs.push(Math.max(0, Math.min(1, v)))
+    }
+  } else {
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i) - center.x
+      const y = positions.getY(i) - center.y
+      const z = positions.getZ(i) - center.z
+      
+      const length = Math.sqrt(x * x + y * y + z * z)
+      if (length > 0.0001) {
+        const nx = x / length
+        const ny = y / length
+        const nz = z / length
+        
+        let u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
+        
+        // Étaler les UVs pour éviter la couture
+        if (seamless) {
+          u = uMin + (u * uRange)
+        }
+        
+        let v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
+        
+        if (isNaN(u) || !isFinite(u)) u = 0.5
+        if (isNaN(v) || !isFinite(v)) v = 0.5
+        
+        uvs.push(Math.max(0, Math.min(1, u)))
+        uvs.push(Math.max(0, Math.min(1, v)))
+      } else {
+        uvs.push(0.5, 0.5)
+      }
+    }
+  }
+  
+  // Ajouter les UVs à la géométrie
+  try {
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+    geometry.attributes.uv.needsUpdate = true
+  } catch (error) {
   }
 }
 
@@ -1144,7 +1569,6 @@ const generateUVs = (geometry) => {
   const uvs = []
   
   if (!positions || positions.count === 0) {
-    console.warn('⚠️ Géométrie sans positions valides')
     return
   }
   
@@ -1156,13 +1580,11 @@ const generateUVs = (geometry) => {
     const z = positions.getZ(i)
     if (isNaN(x) || isNaN(y) || isNaN(z) || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
       hasInvalidPositions = true
-      console.warn(`⚠️ Position invalide à l'index ${i}:`, { x, y, z })
       break
     }
   }
   
   if (hasInvalidPositions) {
-    console.error('❌ La géométrie contient des positions invalides (NaN ou Infinity). Impossible de générer les UVs.')
     return
   }
   
@@ -1173,7 +1595,6 @@ const generateUVs = (geometry) => {
   
   // Vérifier que la taille est valide (non nulle)
   if (size.x === 0 && size.y === 0 && size.z === 0) {
-    console.warn('⚠️ Géométrie avec taille nulle, utilisation de valeurs par défaut')
     // Utiliser une taille minimale pour éviter les divisions par zéro
     size.x = size.x || 1
     size.y = size.y || 1
@@ -1183,7 +1604,6 @@ const generateUVs = (geometry) => {
   // Vérifier que les valeurs sont valides
   if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
       isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
-    console.error('❌ Bounding box invalide (NaN). Impossible de générer les UVs.')
     return
   }
   
@@ -1274,19 +1694,16 @@ const generateUVs = (geometry) => {
   for (let i = 0; i < uvs.length; i++) {
     if (isNaN(uvs[i]) || !isFinite(uvs[i])) {
       hasInvalidUVs = true
-      console.warn(`⚠️ UV invalide à l'index ${i}:`, uvs[i])
       // Corriger les valeurs invalides
       uvs[i] = 0.5
     }
   }
   
   if (hasInvalidUVs) {
-    console.warn('⚠️ Certains UVs étaient invalides et ont été corrigés')
   }
   
   // Vérifier que le nombre d'UVs correspond au nombre de vertices
   if (uvs.length !== positions.count * 2) {
-    console.error(`❌ Nombre d'UVs incorrect: ${uvs.length} attendu ${positions.count * 2}`)
     return
   }
   
@@ -1295,24 +1712,16 @@ const generateUVs = (geometry) => {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     // Marquer l'attribut comme mis à jour
     geometry.attributes.uv.needsUpdate = true
-    console.log('✅ UVs générées avec projection adaptée', {
-      type: isCylindrical ? 'cylindrique' : isWide ? 'plane' : 'sphérique',
-      vertexCount: positions.count,
-      uvCount: uvs.length / 2
-    })
   } catch (error) {
-    console.error('❌ Erreur lors de l\'ajout des UVs à la géométrie:', error)
   }
 }
 
 const applyTexture = (texture) => {
   if (!currentMesh) {
-    console.warn('Aucun mesh pour appliquer la texture')
     return
   }
 
   if (!texture || !texture.image) {
-    console.warn('Texture invalide', texture)
     return
   }
 
@@ -1338,37 +1747,174 @@ const applyTexture = (texture) => {
         child.material.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
             mat.map = texture
+            mat.envMap = environmentMap // Ajouter la texture d'environnement
             mat.transparent = true // Maintenir la transparence
             mat.opacity = 0.3 // Maintenir le niveau de transparence
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
+              mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
+            }
             mat.needsUpdate = true
           } else {
             child.material[idx] = new THREE.MeshStandardMaterial({
               map: texture,
+              envMap: environmentMap, // Ajouter la texture d'environnement
               side: THREE.DoubleSide,
               transparent: true, // Rendre transparent
-              opacity: 0.3 // Niveau de transparence
+              opacity: 0.3, // Niveau de transparence
+              metalness: 0.3,
+              roughness: 0.7
             })
           }
         })
       } else {
         if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
           child.material.map = texture
+          child.material.envMap = environmentMap // Ajouter la texture d'environnement
           child.material.transparent = true // Maintenir la transparence
           child.material.opacity = 0.3 // Maintenir le niveau de transparence
+          if (child.material instanceof THREE.MeshStandardMaterial) {
+            child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
+            child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
+          }
           child.material.needsUpdate = true
         } else {
           child.material = new THREE.MeshStandardMaterial({
             map: texture,
+            envMap: environmentMap, // Ajouter la texture d'environnement
             side: THREE.DoubleSide,
             transparent: true, // Rendre transparent
-            opacity: 0.3 // Niveau de transparence
+            opacity: 0.3, // Niveau de transparence
+            metalness: 0.3,
+            roughness: 0.7
           })
         }
       }
     }
   })
   
-  console.log(`Texture appliquée sur ${meshCount} mesh(es)`)
+}
+
+// ============================================================================
+// SECTION 6 : FONCTIONNALITÉS SPÉCIALES
+// ============================================================================
+
+/**
+ * Crée un nouveau gobelet sans couture en modifiant les UVs du modèle actuel
+ * Les UVs sont étalés pour éviter la discontinuité à U=0/U=1
+ * 
+ * @returns {boolean} - true si succès, false sinon
+ */
+const createSeamlessGoblet = () => {
+  if (!currentMesh) {
+    return false
+  }
+  
+  try {
+    // Cloner le modèle actuel
+    const clonedMesh = currentMesh.clone()
+    
+    // Modifier les UVs de tous les meshes pour éviter la couture
+    clonedMesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        // Cloner la géométrie pour éviter de modifier l'original
+        const clonedGeometry = child.geometry.clone()
+        
+        // Régénérer les UVs sans couture
+        generateSeamlessUVs(clonedGeometry, true)
+        
+        // Remplacer la géométrie
+        child.geometry = clonedGeometry
+        
+        // Appliquer RepeatWrapping pour que la texture se répète sans couture
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat.map) {
+                mat.map.wrapS = THREE.RepeatWrapping
+                mat.map.wrapT = THREE.RepeatWrapping
+                mat.map.needsUpdate = true
+              }
+            })
+          } else {
+            if (child.material.map) {
+              child.material.map.wrapS = THREE.RepeatWrapping
+              child.material.map.wrapT = THREE.RepeatWrapping
+              child.material.map.needsUpdate = true
+            }
+          }
+        }
+      }
+    })
+    
+    // Supprimer l'ancien modèle de la scène
+    if (currentMesh && currentMesh.parent) {
+      currentMesh.parent.remove(currentMesh)
+    } else if (currentMesh) {
+      scene.remove(currentMesh)
+    }
+    
+    // Ajouter le nouveau modèle à la scène
+    scene.add(clonedMesh)
+    currentMesh = clonedMesh
+    
+    // Réappliquer la texture si elle existe
+    if (canvasTexture) {
+      applyTexture(canvasTexture)
+    }
+    
+    // Réappliquer la texture d'environnement
+    if (environmentMap) {
+      clonedMesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat instanceof THREE.MeshStandardMaterial) {
+                mat.envMap = environmentMap
+                mat.needsUpdate = true
+              }
+            })
+          } else {
+            if (child.material instanceof THREE.MeshStandardMaterial) {
+              child.material.envMap = environmentMap
+              child.material.needsUpdate = true
+            }
+          }
+        }
+      })
+    }
+    
+    // Extraire tous les meshes
+    allMeshes = []
+    meshesList.value = []
+    let meshIndex = 0
+    clonedMesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        allMeshes.push(child)
+        
+        // Ajouter les informations du mesh à la liste
+        const geometry = child.geometry
+        const vertexCount = geometry.attributes.position ? geometry.attributes.position.count : 0
+        const hasUVs = geometry.attributes.uv ? true : false
+        
+        meshesList.value.push({
+          index: meshIndex++,
+          mesh: child,
+          name: child.name || `Mesh_${meshIndex}`,
+          vertexCount: vertexCount,
+          hasUVs: hasUVs
+        })
+      }
+    })
+    
+    
+    emit('model-loaded', clonedMesh)
+    emit('meshes-extracted', allMeshes)
+    
+    return true
+  } catch (error) {
+    return false
+  }
 }
 
 const cleanup = () => {
@@ -1428,6 +1974,16 @@ const cleanup = () => {
   camera = null
 }
 
+// ============================================================================
+// SECTION 8 : GESTION DES MESHES (Highlight, Active, etc.)
+// ============================================================================
+
+/**
+ * Met en évidence un mesh (change sa couleur)
+ * 
+ * @param {THREE.Mesh} mesh - Le mesh à mettre en évidence
+ * @param {boolean} isHighlighting - true pour mettre en évidence, false pour réinitialiser
+ */
 const highlightMesh = (mesh, isHighlighting = true) => {
   if (!mesh) return
   
@@ -1475,16 +2031,35 @@ const highlightAllMeshes = () => {
 const setActiveMesh = (mesh) => {
   activeMesh = mesh
   // Lorsqu'un mesh est actif, on peut limiter les clics à ce mesh seulement
-  console.log('Mesh actif défini:', mesh.name || 'Mesh sans nom')
+  // Mettre à jour l'index actif dans la liste
+  if (mesh) {
+    const meshIndex = meshesList.value.findIndex(m => m.mesh === mesh)
+    activeMeshIndex.value = meshIndex >= 0 ? meshIndex : -1
+  } else {
+    activeMeshIndex.value = -1
+  }
+}
+
+/**
+ * Sélectionne un mesh depuis la liste
+ * 
+ * @param {number} index - Index du mesh dans la liste
+ */
+const selectMesh = (index) => {
+  if (index >= 0 && index < meshesList.value.length) {
+    activeMeshIndex.value = index
+    const meshInfo = meshesList.value[index]
+    setActiveMesh(meshInfo.mesh)
+    highlightMesh(meshInfo.mesh, true)
+  } else {
+    activeMeshIndex.value = -1
+    setActiveMesh(null)
+    highlightAllMeshes()
+  }
 }
 
 // Méthode pour mettre à jour la zone de travail
 const updateWorkZone = (top, bottom) => {
-  console.log('Zone de travail mise à jour dans ThreeScene:', {
-    top: (top * 100).toFixed(1) + '%',
-    bottom: (bottom * 100).toFixed(1) + '%',
-    active: ((1 - top - bottom) * 100).toFixed(1) + '%'
-  })
   // Les props sont réactives, donc les changements seront automatiquement pris en compte
 }
 
@@ -1493,10 +2068,8 @@ const setPlacementMode = (active, type) => {
   if (renderer && renderer.domElement) {
     if (active) {
       renderer.domElement.style.cursor = 'crosshair'
-      console.log('🎯 Mode placement activé:', type)
     } else {
       renderer.domElement.style.cursor = 'default'
-      console.log('Mode placement désactivé')
     }
   }
 }
@@ -1506,10 +2079,8 @@ const setDragMode = (active) => {
   if (renderer && renderer.domElement) {
     if (active) {
       renderer.domElement.style.setProperty('cursor', 'move', 'important')
-      console.log('🎯 Mode drag activé - Sélectionnez un objet sur le canvas 2D puis glissez-le sur le modèle 3D')
     } else {
       renderer.domElement.style.setProperty('cursor', 'default', 'important')
-      console.log('Mode drag désactivé')
     }
   }
 }
@@ -1655,6 +2226,7 @@ defineExpose({
   setDragState,
   updateSelectedObjectCoords,
   updateObjectsListFromCanvas,
+  createSeamlessGoblet,
   renderer,
   emit
 })
@@ -1687,6 +2259,21 @@ defineExpose({
   min-width: 250px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
+  transition: all 0.3s ease; /* Transition douce pour le changement de couleur */
+}
+
+/* Style quand le curseur est sur la couture */
+.coordinates-display.on-seam {
+  background: rgba(200, 0, 0, 0.9) !important; /* Fond rouge */
+  border: 2px solid #ff0000; /* Bordure rouge */
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(255, 0, 0, 0.5); /* Ombre rouge */
+}
+
+.coordinates-display.on-seam .coord-title {
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
 }
 
 .selected-object-coords {
@@ -1856,6 +2443,119 @@ defineExpose({
   font-size: 12px;
   color: #fff;
   font-weight: 500;
+}
+
+/* Styles pour la liste des meshes */
+.meshes-list {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(139, 92, 246, 0.9);
+  border: 2px solid #8b5cf6;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 320px;
+  max-height: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+}
+
+.meshes-list .coord-title {
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.meshes-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-right: 4px;
+}
+
+.meshes-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.meshes-scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.meshes-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.meshes-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.mesh-item {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.mesh-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-left-color: rgba(255, 255, 255, 0.5);
+}
+
+.mesh-item.active {
+  background: rgba(255, 255, 255, 0.2);
+  border-left-color: #fff;
+}
+
+.mesh-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.mesh-name {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.active-badge {
+  background: #fff;
+  color: #8b5cf6;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.mesh-details {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.mesh-detail-row {
+  margin: 2px 0;
+}
+
+.mesh-detail-row span {
+  font-weight: 600;
+  margin-right: 4px;
 }
 </style>
 

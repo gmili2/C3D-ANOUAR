@@ -24,20 +24,32 @@
     <div class="studio-header">
       <h1>Studio de Design 3D</h1>
       <div class="header-actions">
-        <!-- Bouton pour uploader un fichier OBJ -->
+        <!-- Bouton pour uploader un fichier 3D (OBJ, GLB, GLTF) -->
         <label for="obj-upload" class="upload-btn">
           <input
             id="obj-upload"
             type="file"
-            accept=".obj"
+            accept=".obj,.glb,.gltf"
             @change="handleFileUpload"
             style="display: none;"
           />
-          📁 Uploader un modèle 3D (.obj)
+          📁 Uploader un modèle 3D (.obj, .glb, .gltf)
         </label>
         <!-- Bouton pour basculer entre vue 2D et 3D -->
         <button @click="toggleView" class="view-toggle-btn">
           {{ currentView === '3d' ? '🎨 Vue 2D' : '🎯 Vue 3D' }}
+        </button>
+        <!-- Bouton pour ajouter une bande verte -->
+        <button @click="addGreenBand" class="upload-btn" :disabled="!hasModel">
+          🟢 Ajouter bande verte
+        </button>
+        <!-- Bouton pour afficher/masquer la couture en rouge -->
+        <button @click="toggleSeamLine" class="upload-btn" :disabled="!hasModel">
+          🔴 Afficher/Masquer couture
+        </button>
+        <!-- Bouton pour créer un gobelet sans couture -->
+        <button @click="createSeamlessGoblet" class="upload-btn" :disabled="!hasModel">
+          ✨ Créer gobelet sans couture
         </button>
       </div>
     </div>
@@ -197,9 +209,9 @@
     </div>
     
     <!-- Indicateur de mode drag -->
-    <div v-if="dragMode" class="drag-indicator">
+    <!-- <div v-if="dragMode" class="drag-indicator">
       🖱️ Mode drag actif - Sélectionnez un élément sur le canvas 2D puis glissez-le sur le modèle 3D
-    </div>
+    </div> -->
   </div>
 </template>
 
@@ -355,9 +367,13 @@ const handleFileUpload = async (event) => {
   const file = event.target.files?.[0]
   if (!file) return
 
-  // Validation : vérifier que c'est bien un fichier .obj
-  if (!file.name.toLowerCase().endsWith('.obj')) {
-    errorMessage.value = 'Veuillez sélectionner un fichier .obj'
+  // Validation : vérifier que c'est bien un fichier 3D supporté
+  const fileName = file.name.toLowerCase()
+  const supportedFormats = ['.obj', '.glb', '.gltf']
+  const isValidFormat = supportedFormats.some(format => fileName.endsWith(format))
+  
+  if (!isValidFormat) {
+    errorMessage.value = 'Veuillez sélectionner un fichier .obj, .glb ou .gltf'
     setTimeout(() => {
       errorMessage.value = ''
     }, 3000)
@@ -528,12 +544,85 @@ const onTextureReady = (texture) => {
  * 
  * @param {Object} clickData - Données du clic contenant canvasX, canvasY, etc.
  */
+const addGreenBand = () => {
+  if (!fabricDesignerRef.value || !fabricDesignerRef.value.addGreenBand) {
+    console.warn('FabricDesigner non disponible')
+    return
+  }
+  
+  fabricDesignerRef.value.addGreenBand()
+  nextTick(() => {
+    updateAllObjectsList()
+  })
+}
+
+/**
+ * Affiche ou masque la ligne de couture en rouge
+ */
+const toggleSeamLine = () => {
+  if (!fabricDesignerRef.value || !fabricDesignerRef.value.addSeamLine) {
+    console.warn('FabricDesigner non disponible')
+    return
+  }
+  
+  fabricDesignerRef.value.addSeamLine()
+  nextTick(() => {
+    updateAllObjectsList()
+  })
+}
+
+const createSeamlessGoblet = () => {
+  if (!threeSceneRef.value || !threeSceneRef.value.createSeamlessGoblet) {
+    console.warn('ThreeScene non disponible')
+    return
+  }
+  
+  const success = threeSceneRef.value.createSeamlessGoblet()
+  if (success) {
+    console.log('✅ Gobelet sans couture créé avec succès')
+    // Réappliquer la texture du canvas si elle existe
+    if (fabricCanvasElement.value && threeSceneRef.value.setupSharedCanvasTexture) {
+      nextTick(() => {
+        threeSceneRef.value.setupSharedCanvasTexture(fabricCanvasElement.value)
+      })
+    }
+  } else {
+    console.error('❌ Erreur lors de la création du gobelet sans couture')
+    errorMessage.value = 'Erreur lors de la création du gobelet sans couture'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+  }
+}
+
 const on3DClickForPlacement = (clickData) => {
   // Vérifier que le clic est dans la zone active (pas null)
   // Les clics hors zone retournent null
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
       clickData.canvasX === null || clickData.canvasY === null) {
     console.warn('⚠️ Clic hors zone de travail')
+    return
+  }
+  
+  // Vérifier si le clic est sur la couture (U proche de 0 ou 1)
+  const seamThreshold = 0.01 // Tolérance de 1% pour détecter la couture
+  const uvU = clickData.uv?.x || 0
+  const isOnSeam = uvU < seamThreshold || uvU > (1 - seamThreshold)
+  
+  // Si le clic est sur la couture, ajouter un point vert
+  if (isOnSeam && clickData.uv) {
+    console.log('🟢 Clic sur la couture - Ajout d\'un point vert:', {
+      uvU: uvU.toFixed(4),
+      canvasX: clickData.canvasX,
+      canvasY: clickData.canvasY
+    })
+    
+    if (fabricDesignerRef.value && fabricDesignerRef.value.addSeamPoint) {
+      fabricDesignerRef.value.addSeamPoint(clickData.canvasX, clickData.canvasY)
+      nextTick(() => {
+        updateAllObjectsList()
+      })
+    }
     return
   }
   

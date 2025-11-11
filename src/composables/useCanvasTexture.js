@@ -82,13 +82,6 @@ export const setupCanvasTexture = (canvas, materials) => {
     // Forcer les dimensions de la texture à correspondre exactement au canvas
     // Note: CanvasTexture utilise automatiquement canvas.width et canvas.height
     // mais on s'assure qu'ils correspondent aux dimensions logiques
-    console.log('📐 Création texture avec dimensions:', {
-      canvasWidth: canvas.width,
-      canvasHeight: canvas.height,
-      canvasOffsetWidth: canvas.offsetWidth,
-      canvasOffsetHeight: canvas.offsetHeight,
-      devicePixelRatio: window.devicePixelRatio || 1
-    })
   }
   
   // ===== CONFIGURATION OPTIMALE POUR LES TEXTURES CANVAS =====
@@ -118,11 +111,6 @@ export const setupCanvasTexture = (canvas, materials) => {
     }
   })
 
-  console.log('CanvasTexture configurée avec succès', {
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
-    materialsCount: materialsArray.length
-  })
 
   return texture
 }
@@ -138,7 +126,6 @@ export const setupCanvasTexture = (canvas, materials) => {
  */
 export const updateTexture = (texture) => {
   if (!texture || !(texture instanceof THREE.CanvasTexture)) {
-    console.warn('Texture invalide pour la mise à jour')
     return
   }
 
@@ -156,14 +143,36 @@ export const updateTexture = (texture) => {
  * @param {THREE.CanvasTexture} texture - La texture à appliquer
  */
 export const applyTextureToMesh = (mesh, texture) => {
-  if (!mesh || !texture) return
+  if (!mesh || !texture) {
+    console.warn('⚠️ [DEBUG] applyTextureToMesh: mesh ou texture manquant', {
+      hasMesh: !!mesh,
+      hasTexture: !!texture
+    })
+    return
+  }
+
+  console.log('🎨 [DEBUG] applyTextureToMesh - Début')
+  console.log('📐 [DEBUG] Texture à appliquer:', {
+    width: texture.image?.width || 'N/A',
+    height: texture.image?.height || 'N/A',
+    uuid: texture.uuid
+  })
+
+  let meshCount = 0
+  let materialCount = 0
 
   // Parcourir récursivement tous les enfants du mesh
   mesh.traverse((child) => {
     if (child instanceof THREE.Mesh) {
+      meshCount++
+      const meshName = child.name || `Mesh_${meshCount}`
+      console.log(`  🔷 [DEBUG] Application sur ${meshName}...`)
+      
       // Cas 1: Matériau est un tableau (multi-matériaux)
       if (Array.isArray(child.material)) {
-        child.material.forEach(mat => {
+        console.log(`    📦 [DEBUG] ${meshName} a ${child.material.length} matériaux`)
+        child.material.forEach((mat, idx) => {
+          materialCount++
           if (mat instanceof THREE.MeshStandardMaterial || 
               mat instanceof THREE.MeshPhongMaterial ||
               mat instanceof THREE.MeshBasicMaterial) {
@@ -174,16 +183,18 @@ export const applyTextureToMesh = (mesh, texture) => {
             mat.needsUpdate = true
           } else {
             // Matériau incompatible : créer un nouveau matériau
-            child.material = new THREE.MeshStandardMaterial({
+            child.material[idx] = new THREE.MeshStandardMaterial({
               map: texture,
               side: THREE.DoubleSide,  // Rendu des deux côtés (important pour les t-shirts)
               transparent: true, // Rendre transparent
               opacity: 0.3 // Niveau de transparence
             })
+            console.log(`    🔄 [DEBUG] Matériau ${idx + 1}/${child.material.length} recréé`)
           }
         })
       } else {
         // Cas 2: Matériau unique
+        materialCount++
         if (child.material instanceof THREE.MeshStandardMaterial || 
             child.material instanceof THREE.MeshPhongMaterial ||
             child.material instanceof THREE.MeshBasicMaterial) {

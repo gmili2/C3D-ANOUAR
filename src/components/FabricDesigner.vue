@@ -293,7 +293,6 @@ const replaceOriginalWithCopy = (original, copy) => {
   // Vérifier que la copie existe toujours dans le canvas
   const objects = canvas.getObjects()
   if (!objects.includes(copy)) {
-    console.warn('La copie n\'existe pas dans le canvas')
     return
   }
   
@@ -486,7 +485,6 @@ const cloneFabricObject = async (obj) => {
       const cloned = await objClass.fromObject(objData)
       return cloned
     } catch (e) {
-      console.error('Erreur lors du clonage:', e)
       return null
     }
   }
@@ -924,17 +922,6 @@ const initCanvas = () => {
       canvasElement.value.style.visibility = 'visible'
       canvasElement.value.style.opacity = '1'
     }
-    
-    console.log('Canvas Fabric.js initialisé:', {
-      width: canvasWidth,
-      height: canvasHeight,
-      element: canvasElement.value,
-      selection: canvas.selection,
-      elementWidth: canvasElement.value?.offsetWidth,
-      elementHeight: canvasElement.value?.offsetHeight,
-      canvasWidth: canvas.width,
-      canvasHeight: canvas.height
-    })
 
     // Set up drawing mode
     canvas.isDrawingMode = isDrawMode.value
@@ -1171,15 +1158,6 @@ const initCanvas = () => {
           canvasEl.style.display = 'block'
           canvasEl.style.visibility = 'visible'
           canvasEl.style.opacity = '1'
-          console.log('Canvas élément final:', {
-            display: canvasEl.style.display,
-            visibility: canvasEl.style.visibility,
-            opacity: canvasEl.style.opacity,
-            width: canvasEl.width,
-            height: canvasEl.height,
-            offsetWidth: canvasEl.offsetWidth,
-            offsetHeight: canvasEl.offsetHeight
-          })
         }
         emit('canvas-ready', canvas.getElement())
       })
@@ -1188,7 +1166,6 @@ const initCanvas = () => {
     // Ajouter les raccourcis clavier
     setupKeyboardShortcuts()
   } catch (error) {
-    console.error('Error initializing Fabric.js canvas:', error)
     alert('Erreur lors de l\'initialisation du canvas: ' + error.message)
   }
 }
@@ -1309,7 +1286,6 @@ const drawWorkZoneIndicators = () => {
     
     canvas.renderAll()
   } catch (error) {
-    console.error('Erreur lors du dessin des indicateurs de zone:', error)
   }
 }
 
@@ -1386,7 +1362,6 @@ const applyColorToSelection = () => {
   requestTextureUpdate()
   emit('design-updated', canvas)
   
-  console.log('Couleur appliquée à l\'objet sélectionné:', drawColor.value)
 }
 
 const toggleDrawMode = () => {
@@ -1417,16 +1392,10 @@ const toggleDrawMode = () => {
 
 const addText = () => {
   if (!canvas) {
-    console.error('Canvas non initialisé')
     alert('Canvas non initialisé. Veuillez attendre le chargement.')
     return
   }
   
-  console.log('Ajout d\'un texte, canvas:', {
-    exists: !!canvas,
-    width: canvas.width,
-    height: canvas.height
-  })
   
   const text = new Textbox('Nouveau texte', {
     left: canvasWidth / 2 - 100,
@@ -1439,12 +1408,6 @@ const addText = () => {
     evented: true
   })
   
-  console.log('Texte créé:', {
-    left: text.left,
-    top: text.top,
-    text: text.text,
-    fill: text.fill
-  })
   
   canvas.add(text)
   canvas.setActiveObject(text)
@@ -1459,10 +1422,6 @@ const addText = () => {
   
   setTimeout(() => {
     canvas.renderAll()
-    console.log('Texte ajouté, vérification:', {
-      objectsCount: canvas.getObjects().length,
-      canvasVisible: canvas.getElement()?.offsetWidth > 0
-    })
   }, 50)
 }
 
@@ -1500,7 +1459,6 @@ const addImage = () => {
       
       URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Error loading image:', error)
       alert('Erreur lors du chargement de l\'image')
     }
   }
@@ -1509,17 +1467,10 @@ const addImage = () => {
 
 const addCircle = () => {
   if (!canvas) {
-    console.error('Canvas non initialisé')
     alert('Canvas non initialisé. Veuillez attendre le chargement.')
     return
   }
   
-  console.log('Ajout d\'un cercle, canvas:', {
-    exists: !!canvas,
-    width: canvas.width,
-    height: canvas.height,
-    objectsCount: canvas.getObjects().length
-  })
   
   const circle = new Circle({
     left: canvasWidth / 2 - 50,
@@ -1532,14 +1483,6 @@ const addCircle = () => {
     evented: true
   })
   
-  console.log('Cercle créé:', {
-    left: circle.left,
-    top: circle.top,
-    radius: circle.radius,
-    fill: circle.fill,
-    selectable: circle.selectable,
-    evented: circle.evented
-  })
   
   canvas.add(circle)
   canvas.setActiveObject(circle)
@@ -1555,11 +1498,6 @@ const addCircle = () => {
   // Double vérification
   setTimeout(() => {
     canvas.renderAll()
-    console.log('Cercle ajouté, vérification:', {
-      objectsCount: canvas.getObjects().length,
-      canvasVisible: canvas.getElement()?.offsetWidth > 0,
-      activeObject: !!canvas.getActiveObject()
-    })
   }, 50)
 }
 
@@ -1587,6 +1525,171 @@ const addRectangle = () => {
   canvas.selection = true // Réactiver la sélection
   canvas.renderAll()
   requestTextureUpdate() // Signal pour mettre à jour la texture 3D
+  emit('design-updated', canvas)
+}
+
+/**
+ * Ajoute une ligne rouge verticale pour visualiser la couture du gobelet
+ * La couture est à x = 0 (et x = canvasWidth car c'est le même point sur un modèle cylindrique)
+ */
+const addSeamLine = () => {
+  if (!canvas) {
+    return
+  }
+  
+  // Vérifier si une ligne de couture existe déjà
+  const existingSeam = canvas.getObjects().find(obj => obj.userData?.isSeamLine)
+  if (existingSeam) {
+    // Si elle existe, la supprimer
+    canvas.remove(existingSeam)
+    canvas.renderAll()
+    requestTextureUpdate()
+    emit('design-updated', canvas)
+    return
+  }
+  
+  // Créer une ligne rouge verticale à x = 0 (couture)
+  // La ligne va de haut en bas du canvas
+  const seamLine = new Rect({
+    left: 0,
+    top: 0,
+    width: 2, // Largeur de 2px pour être visible
+    height: canvasHeight,
+    fill: '#ff0000', // Rouge pur
+    stroke: '#cc0000', // Bordure rouge foncé
+    strokeWidth: 0,
+    rx: 0,
+    ry: 0,
+    selectable: false, // Non sélectionnable pour éviter de la déplacer
+    evented: false, // Ne bloque pas les interactions
+    excludeFromExport: false // Inclure dans l'export
+  })
+  
+  seamLine.userData = { isSeamLine: true }
+  
+  canvas.add(seamLine)
+  // Envoyer la ligne à l'arrière-plan pour ne pas gêner
+  try {
+    if (canvas.sendObjectToBack) {
+      canvas.sendObjectToBack(seamLine)
+    }
+  } catch (e) {
+    // Si la méthode n'existe pas, ignorer
+  }
+  
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+  
+}
+
+/**
+ * Ajoute un point vert à la position spécifiée (utilisé pour marquer les clics sur la couture)
+ * @param {number} x - Position X sur le canvas
+ * @param {number} y - Position Y sur le canvas
+ */
+const addSeamPoint = (x, y) => {
+  if (!canvas) {
+    return
+  }
+  
+  // Créer un petit cercle vert pour marquer la position de la couture
+  const pointSize = 8 // Rayon du point en pixels
+  const seamPoint = new Circle({
+    left: x - pointSize,
+    top: y - pointSize,
+    radius: pointSize,
+    fill: '#00ff00', // Vert pur
+    stroke: '#00cc00', // Bordure verte foncée
+    strokeWidth: 2,
+    selectable: false, // Non sélectionnable
+    evented: false, // Ne bloque pas les interactions
+    excludeFromExport: false // Inclure dans l'export
+  })
+  
+  // Marquer ce point comme point de couture
+  seamPoint.userData = { isSeamPoint: true }
+  
+  canvas.add(seamPoint)
+  // Envoyer le point à l'avant-plan pour qu'il soit visible
+  try {
+    if (canvas.bringObjectToFront) {
+      canvas.bringObjectToFront(seamPoint)
+    }
+  } catch (e) {
+    // Si la méthode n'existe pas, ignorer
+  }
+  
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+  
+}
+
+/**
+ * Ajoute une bande verte horizontale au centre du gobelet
+ * Cette bande apparaîtra comme une bande horizontale sur le modèle 3D
+ */
+const addGreenBand = () => {
+  if (!canvas) {
+    return
+  }
+  
+  // Calculer la position au centre vertical du canvas (zone active)
+  const topHeight = canvasHeight * props.workZoneTop
+  const bottomHeight = canvasHeight * props.workZoneBottom
+  const activeZoneTop = topHeight
+  const activeZoneBottom = canvasHeight - bottomHeight
+  const activeZoneCenterY = activeZoneTop + (activeZoneBottom - activeZoneTop) / 2
+  
+  // Créer une bande verte horizontale
+  // IMPORTANT: Éviter la zone de couture (bords gauche et droit)
+  // La couture est à x = 0 et x = canvasWidth (même point dans la projection cylindrique)
+  // On crée deux bandes séparées pour éviter que la bande soit traversée par la couture
+  
+  const bandHeight = 20
+  const seamAvoidanceZone = 50 // Zone à éviter autour de la couture (50px de chaque côté)
+  const bandWidth = (canvasWidth - seamAvoidanceZone * 2) / 2 // Largeur de chaque bande
+  
+  // Bande gauche (de la zone d'évitement jusqu'au centre)
+  const leftBand = new Rect({
+    left: seamAvoidanceZone, // Commencer après la zone de couture
+    top: activeZoneCenterY - bandHeight / 2,
+    width: bandWidth,
+    height: bandHeight,
+    fill: '#00ff00', // Vert pur
+    stroke: '#00cc00', // Bordure vert foncé
+    strokeWidth: 1,
+    rx: 0,
+    ry: 0,
+    selectable: true,
+    evented: true
+  })
+  
+  // Bande droite (du centre jusqu'à la zone d'évitement)
+  const rightBand = new Rect({
+    left: canvasWidth / 2, // Commencer au centre
+    top: activeZoneCenterY - bandHeight / 2,
+    width: bandWidth,
+    height: bandHeight,
+    fill: '#00ff00', // Vert pur
+    stroke: '#00cc00', // Bordure vert foncé
+    strokeWidth: 1,
+    rx: 0,
+    ry: 0,
+    selectable: true,
+    evented: true
+  })
+  
+  canvas.add(leftBand)
+  canvas.add(rightBand)
+  canvas.setActiveObject(leftBand) // Sélectionner la première bande
+  
+  canvas.isDrawingMode = false
+  isDrawMode.value = false
+  canvas.selection = true
+  canvas.renderAll()
+  requestTextureUpdate()
   emit('design-updated', canvas)
 }
 
@@ -1622,7 +1725,6 @@ const exportDesign = () => {
 // Methods to get canvas data for texture
 const getCanvasAsTexture = () => {
   if (!canvas) {
-    console.warn('Canvas Fabric.js non disponible pour la texture')
     return null
   }
   
@@ -1653,34 +1755,11 @@ const getCanvasAsTexture = () => {
         const dataURL = tempCanvas.toDataURL()
         const hasContent = dataURL.length > 100
         
-        console.log('Canvas converti en texture:', {
-          width: tempCanvas.width,
-          height: tempCanvas.height,
-          objectCount: objectCount,
-          hasContent: hasContent,
-          dataURLLength: dataURL.length,
-          objects: canvas.getObjects().map(obj => ({
-            type: obj.type,
-            left: obj.left,
-            top: obj.top
-          }))
-        })
-        
-        if (!hasContent) {
-          console.warn('⚠️ Le canvas converti semble vide!')
-        }
-        
         return tempCanvas
       } else {
-        console.warn('Fabric canvas element not ready:', {
-          fabricCanvas: !!fabricCanvas,
-          width: fabricCanvas?.width,
-          height: fabricCanvas?.height
-        })
       }
     }
   } catch (error) {
-    console.error('Error creating texture canvas:', error)
   }
   
   return null
@@ -1692,7 +1771,6 @@ const getCanvasAsTexture = () => {
  */
 const activatePlacementMode = (type) => {
   if (!canvas) {
-    console.error('Canvas non initialisé')
     return
   }
   
@@ -1713,11 +1791,9 @@ const activatePlacementMode = (type) => {
  */
 const placeElementAt = (type, x, y) => {
   if (!canvas) {
-    console.error('Canvas non initialisé')
     return
   }
   
-  console.log('Placing element:', { type, x, y })
   
   // Vérifier que la position est dans la zone active
   const topHeight = canvasHeight * props.workZoneTop
@@ -1742,7 +1818,6 @@ const placeElementAt = (type, x, y) => {
       placeImageAt(x, adjustedY)
       break
     default:
-      console.warn('Type d\'élément non reconnu:', type)
   }
   
   // Désactiver le mode placement après placement
@@ -1849,7 +1924,6 @@ const placeImageAt = async (x, y) => {
       
       URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Error loading image:', error)
       alert('Erreur lors du chargement de l\'image')
     }
   }
@@ -1895,7 +1969,6 @@ const findObjectAtPosition = (x, y) => {
       }
     } catch (e) {
       // Si containsPoint échoue, continuer avec le fallback
-      console.debug('containsPoint failed, using fallback:', e)
     }
     
     // Fallback: utiliser une vérification améliorée qui prend en compte l'origine de l'objet
@@ -1961,17 +2034,10 @@ const findObjectAtPosition = (x, y) => {
           const radius = obj.radius * (obj.scaleX || 1)
           const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
           if (distance <= radius + tolerance) {
-            console.log('✅ Cercle trouvé à la position:', { x, y, centerX, centerY, radius, distance })
             return obj
           }
         } else {
           // Pour les autres objets, la vérification rectangulaire suffit
-          console.log('✅ Objet rectangulaire trouvé à la position:', { 
-            x, y, 
-            actualLeft, actualTop, 
-            objWidth, objHeight,
-            type: obj.type 
-          })
           return obj
         }
       }
@@ -2050,23 +2116,13 @@ const detectResizeHandle = (obj, x, y, threshold = 10) => {
  */
 const selectObjectAtPosition = (x, y) => {
   if (!canvas) {
-    console.warn('⚠️ Canvas non disponible pour selectObjectAtPosition')
     return false
   }
   
-  console.log('🔍 Recherche d\'objet à la position:', { x, y })
   
   const obj = findObjectAtPosition(x, y)
   
   if (obj) {
-    console.log('✅ Objet trouvé:', {
-      type: obj.type,
-      left: obj.left,
-      top: obj.top,
-      width: obj.width,
-      height: obj.height,
-      isWrapAroundCopy: obj.userData?.isWrapAroundCopy
-    })
     
     // Si c'est une copie wrap-around, sélectionner l'original à la place
     const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
@@ -2086,7 +2142,6 @@ const selectObjectAtPosition = (x, y) => {
   }
   
   // Si aucun objet n'a été trouvé exactement, chercher l'objet le plus proche
-  console.log('ℹ️ Aucun objet trouvé exactement à la position:', { x, y })
   
   const objects = canvas.getObjects().filter(obj => 
     !obj.userData?.isWorkZoneIndicator && 
@@ -2125,35 +2180,7 @@ const selectObjectAtPosition = (x, y) => {
     const isNear = x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
                    y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
     
-    console.log('🔍 Vérification objet unique (détaillé):', {
-      click: { x: x.toFixed(2), y: y.toFixed(2) },
-      object: {
-        type: obj.type,
-        left: actualLeft.toFixed(2),
-        top: actualTop.toFixed(2),
-        width: objWidth.toFixed(2),
-        height: objHeight.toFixed(2),
-        scaleX: obj.scaleX?.toFixed(2) || '1.00',
-        scaleY: obj.scaleY?.toFixed(2) || '1.00',
-        angle: obj.angle?.toFixed(2) || '0.00'
-      },
-      bounds: {
-        minX: (actualLeft - tolerance).toFixed(2),
-        maxX: (actualLeft + objWidth + tolerance).toFixed(2),
-        minY: (actualTop - tolerance).toFixed(2),
-        maxY: (actualTop + objHeight + tolerance).toFixed(2)
-      },
-      distance: {
-        fromLeft: (x - actualLeft).toFixed(2),
-        fromTop: (y - actualTop).toFixed(2),
-        fromCenterX: (x - (actualLeft + objWidth / 2)).toFixed(2),
-        fromCenterY: (y - (actualTop + objHeight / 2)).toFixed(2)
-      },
-      isNear: isNear
-    })
-    
     if (isNear) {
-      console.log('✅ Un seul objet disponible et clic proche, sélection')
       const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
         ? obj.userData.originalObject 
         : obj
@@ -2168,7 +2195,6 @@ const selectObjectAtPosition = (x, y) => {
       
       return true
     } else {
-      console.log('ℹ️ Clic loin de l\'objet unique, désélection')
       canvas.discardActiveObject()
       canvas.renderAll()
       emit('object-deselected')
@@ -2226,7 +2252,6 @@ const selectObjectAtPosition = (x, y) => {
   // Si on n'a toujours pas trouvé d'objet mais qu'il y a des objets, prendre le plus proche
   // MAIS seulement s'il est dans une zone raisonnable (max 300px)
   if (!closestObj && objects.length > 0) {
-    console.log('⚠️ Aucun objet dans la zone de tolérance, recherche du plus proche')
     const maxDistance = 300 // Distance maximale pour sélectionner un objet
     objects.forEach(obj => {
       const objLeft = obj.left || 0
@@ -2265,12 +2290,6 @@ const selectObjectAtPosition = (x, y) => {
   
   // Si on a trouvé un objet proche, le sélectionner
   if (closestObj) {
-    console.log('✅ Objet le plus proche trouvé:', {
-      type: closestObj.type,
-      distance: closestDistance,
-      left: closestObj.left,
-      top: closestObj.top
-    })
     
     const targetObject = closestObj.userData?.isWrapAroundCopy && closestObj.userData?.originalObject 
       ? closestObj.userData.originalObject 
@@ -2286,49 +2305,6 @@ const selectObjectAtPosition = (x, y) => {
     
     return true
   }
-  
-  // Afficher les détails pour le débogage
-  console.log('📊 Objets disponibles:', objects.map(obj => {
-    const objLeft = obj.left || 0
-    const objTop = obj.top || 0
-    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-    const originX = obj.originX || 'left'
-    const originY = obj.originY || 'top'
-    
-    let actualLeft = objLeft
-    let actualTop = objTop
-    
-    if (originX === 'center') {
-      actualLeft = objLeft - objWidth / 2
-    } else if (originX === 'right') {
-      actualLeft = objLeft - objWidth
-    }
-    
-    if (originY === 'center') {
-      actualTop = objTop - objHeight / 2
-    } else if (originY === 'bottom') {
-      actualTop = objTop - objHeight
-    }
-    
-    const centerX = actualLeft + objWidth / 2
-    const centerY = actualTop + objHeight / 2
-    const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
-    
-    return {
-      type: obj.type,
-      left: objLeft,
-      top: objTop,
-      actualLeft,
-      actualTop,
-      centerX,
-      centerY,
-      width: objWidth,
-      height: objHeight,
-      distanceFromClick: distance,
-      clickPosition: { x, y }
-    }
-  }))
   
   canvas.discardActiveObject()
   canvas.renderAll()
@@ -2727,7 +2703,10 @@ defineExpose({
   resetResizeHover,
   undo,
   redo,
-  deleteSelected
+  deleteSelected,
+  addGreenBand,
+  addSeamLine,
+  addSeamPoint
 })
 </script>
 

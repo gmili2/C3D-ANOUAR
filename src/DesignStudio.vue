@@ -1327,7 +1327,7 @@ onMounted(async () => {
   try {
     // Charger le fichier downloadSvg3.obj par défaut
     // Utiliser un import dynamique avec Vite pour charger le fichier
-    const objUrl = new URL('./downloadSvg3.obj', import.meta.url)
+    const objUrl = new URL('./downloadSvgGoblet.obj', import.meta.url)
     
     const response = await fetch(objUrl)
     if (!response.ok) {

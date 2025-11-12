@@ -1112,8 +1112,8 @@ const loadModel = async (url) => {
     }
 
     // Scale to fit in view - Réduire la taille pour mieux correspondre au canvas 2D
-    // Facteur réduit de 3 à 2.2 pour diminuer la taille du gobelet
-    const scale = 2.2 / maxDim
+    // Facteur réduit de 3 à 1.3 pour diminuer la taille du gobelet de manière visible
+    const scale = 1.3 / maxDim
     obj.scale.multiplyScalar(scale)
 
     // Center the model
@@ -1199,7 +1199,7 @@ const loadModel = async (url) => {
     // Adjust camera - position fixe pour avoir des coordonnées stables
     // Distance ajustée pour correspondre à la nouvelle taille du modèle
     const scaledMaxDim = maxDim * scale
-    const distance = scaledMaxDim * 0.5  // Distance réduite pour zoomer le modèle (0.5 au lieu de 0.7)
+    const distance = scaledMaxDim * 0.6  // Distance réduite pour zoomer le modèle (0.5 au lieu de 0.7)
     camera.position.set(distance, distance, distance)
     camera.lookAt(0, 0, 0)
     

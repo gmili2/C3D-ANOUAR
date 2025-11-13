@@ -94,7 +94,8 @@ const emit = defineEmits([
   'object-selected',         // Un objet a été sélectionné
   'object-deselected',       // Aucun objet n'est sélectionné
   'move-object',             // Un objet a été déplacé
-  'objects-changed'          // La liste des objets a changé (ajout/suppression)
+  'objects-changed',         // La liste des objets a changé (ajout/suppression)
+  'object-rotated'           // Un objet a été roté (pour appliquer la rotation au modèle 3D)
 ])
 
 // ===== PROPS =====
@@ -541,13 +542,6 @@ const activateControlsForObject = (obj) => {
   if (obj && !obj.userData?.isWorkZoneIndicator) {
     // Vérifier si l'objet est actuellement sélectionné
     const isSelected = canvas && canvas.getActiveObject() === obj
-    console.log('Activation contrôles pour:', {
-      type: obj.type,
-      isWrapAroundCopy: obj.userData?.isWrapAroundCopy,
-      isSelected: isSelected,
-      selectable: obj.selectable,
-      evented: obj.evented
-    })
     
     // Activer les contrôles avec setControlsVisibility
     // Activer tous les contrôles, y compris mt et mtr pour tous les objets
@@ -593,9 +587,6 @@ const activateControlsForObject = (obj) => {
           actionName: obj.controls[key]?.actionName
         }
       })
-      console.log('✅ Contrôles activés pour:', obj.type, controlsState, '| Sélectionné:', isSelected)
-    } else {
-      console.log('⚠️ Contrôles activés pour:', obj.type, 'mais obj.controls non disponible')
     }
   }
 }
@@ -1497,6 +1488,14 @@ const initCanvas = () => {
         }
       }
       
+      // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
+      if (obj && !obj.userData?.isWorkZoneIndicator) {
+        emit('object-rotated', {
+          object: obj,
+          angle: obj.angle || 0 // Angle en degrés
+        })
+      }
+      
       saveHistory()
       signalChange()
     })
@@ -1575,9 +1574,18 @@ const initCanvas = () => {
                         const dx = coords.tr.x - coords.tl.x
                         const dy = coords.tr.y - coords.tl.y
                         const length = Math.sqrt(dx * dx + dy * dy)
-                        const offset = 30 // Distance au-dessus du bord
-                        finalX = centerTopX - (dy / length) * offset
-                        finalY = centerTopY + (dx / length) * offset
+                        
+                        // Si le rectangle n'est pas roté (length horizontal), simplifier le calcul
+                        if (Math.abs(dy) < 0.01) {
+                          // Rectangle non roté : positionner directement au-dessus
+                          finalX = centerTopX
+                          finalY = centerTopY - 30 // Directement au-dessus (Y diminue vers le haut)
+                        } else {
+                          // Rectangle roté : utiliser le calcul vectoriel
+                          const offset = 30 // Distance au-dessus du bord
+                          finalX = centerTopX - (dy / length) * offset
+                          finalY = centerTopY + (dx / length) * offset
+                        }
                         break
                       default:
                         // Position par défaut basée sur control.x et control.y
@@ -1702,6 +1710,18 @@ const redo = () => {
 }
 
 // Fonction pour supprimer l'élément sélectionné
+/**
+ * Désélectionne l'objet actuellement sélectionné sur le canvas
+ */
+const deselectObject = () => {
+  if (!canvas) return
+  
+  canvas.discardActiveObject()
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+}
+
 const deleteSelected = () => {
   if (!canvas || !hasSelection.value) return
   
@@ -2211,23 +2231,20 @@ const placeCircleAt = (x, y) => {
 }
 
 /**
- * Crée deux rectangles côte à côte à la position (x, y) et configure leurs contrôles
+ * Crée un rectangle centré à la position (x, y) et configure ses contrôles
  * 
- * @param {number} x - Position X où placer les rectangles (point central entre les deux)
- * @param {number} y - Position Y où placer les rectangles (centre vertical)
+ * @param {number} x - Position X où placer le rectangle (centre)
+ * @param {number} y - Position Y où placer le rectangle (centre)
  */
 const placeRectangleAt = (x, y) => {
   // ===== ÉTAPE 1: Définir les dimensions =====
-  const rectWidth = 100      // Largeur de chaque rectangle
-  const rectHeight = 70      // Hauteur de chaque rectangle
-  const spacing = 10         // Espacement entre les deux rectangles
+  const rectWidth = 100      // Largeur du rectangle
+  const rectHeight = 100      // Hauteur du rectangle
   
-  // ===== ÉTAPE 2: Créer le premier rectangle (à gauche du point cliqué) =====
-  // Position: x - rectWidth - spacing/2 (pour que le rectangle soit à gauche)
-  // Exemple: si x=500, le rectangle sera à 500-100-5 = 395 (son bord droit sera à 495)
-  const rect1 = new Rect({
-    left: x - rectWidth - spacing / 2,  // Position X: à gauche du point cliqué
-    top: y - rectHeight / 2,             // Position Y: centré verticalement
+  // ===== ÉTAPE 2: Créer le rectangle centré sur (x, y) =====
+  const rect = new Rect({
+    left: x - rectWidth / 2,  // Position X: centré horizontalement
+    top: y - rectHeight / 2,   // Position Y: centré verticalement
     width: rectWidth,
     height: rectHeight,
     fill: drawColor.value || '#000000',
@@ -2239,47 +2256,15 @@ const placeRectangleAt = (x, y) => {
     evented: true
   })
   
-  // ===== ÉTAPE 3: Créer le deuxième rectangle (à droite du point cliqué) =====
-  // Position: x + spacing/2 (pour que le rectangle soit à droite)
-  // Exemple: si x=500, le rectangle sera à 500+5 = 505 (son bord gauche sera à 505)
-  const rect2 = new Rect({
-    left: x + spacing / 2,   // Position X: à droite du point cliqué
-    top: y - rectHeight / 2, // Position Y: centré verticalement (même que rect1)
-    width: rectWidth,
-    height: rectHeight,
-    fill: drawColor.value || '#000000',
-    stroke: '#000000',
-    strokeWidth: 2,
-    rx: 8,
-    ry: 8,
-    selectable: true,
-    evented: true
-  })
-  
-  // ===== ÉTAPE 4: Configurer les contrôles du premier rectangle =====
+  // ===== ÉTAPE 3: Configurer les contrôles du rectangle =====
   // Les contrôles sont les petits carrés/cercles qui permettent de redimensionner/rotater
   // mt = middle-top, mb = middle-bottom, ml = middle-left, mr = middle-right
   // tl = top-left, tr = top-right, bl = bottom-left, br = bottom-right
   // mtr = middle-top-rotation (contrôle de rotation)
-  // rect1.userData = rect1.userData || {}
-  // rect1.userData.controlsConfig = {
-  //   mt: true,   // ✅ Contrôle en haut au milieu
-  //   mb: true,   // ✅ Contrôle en bas au milieu
-  //   ml: true,   // ✅ Contrôle à gauche au milieu
-  //   mr: true,   // ✅ Contrôle à droite au milieu
-  //   tl: true,   // ✅ Contrôle coin haut-gauche
-  //   tr: true,   // ✅ Contrôle coin haut-droite
-  //   bl: true,   // ✅ Contrôle coin bas-gauche
-  //   br: true,   // ✅ Contrôle coin bas-droite
-  //   mtr: true  // ✅ Contrôle de rotation (en haut)
-  // }
-  // rect1.userData.customizeControls = true // Flag pour appliquer la personnalisation (couleur rouge)
-  
-  // ===== ÉTAPE 5: Configurer les contrôles du deuxième rectangle =====
-  rect2.userData = rect2.userData || {}
-  rect2.userData.controlsConfig = {
+  rect.userData = rect.userData || {}
+  rect.userData.controlsConfig = {
     mt: true,   // ✅ Contrôle en haut au milieu
-    mb: false,  // ❌ Pas de contrôle en bas au milieu
+    mb: true,   // ✅ Contrôle en bas au milieu
     ml: true,   // ✅ Contrôle à gauche au milieu (pour redimensionner vers la gauche)
     mr: true,   // ✅ Contrôle à droite au milieu (pour redimensionner vers la droite)
     tl: true,   // ✅ Contrôle coin haut-gauche
@@ -2288,73 +2273,24 @@ const placeRectangleAt = (x, y) => {
     br: true,   // ✅ Contrôle coin bas-droite
     mtr: true  // ✅ Contrôle de rotation (en haut)
   }
-  // rect2.userData.customizeControls = true // Flag pour appliquer la personnalisation (couleur rouge)
   
-  // ===== ÉTAPE 6: Ajouter les rectangles au canvas =====
+  // ===== ÉTAPE 4: Ajouter le rectangle au canvas =====
   // Quand on ajoute un objet, l'événement 'object:added' se déclenche
   // Cet événement vérifie si userData.controlsConfig existe et l'applique automatiquement
-  canvas.add(rect1)
-  canvas.add(rect2)
+  canvas.add(rect)
   
-  // ===== ÉTAPE 7: Enregistrer les objets pour l'affichage multi-sélection =====
-  // On stocke les deux rectangles dans canvas.userData.multiSelectedObjects
-  // Cela permet à l'événement 'after:render' d'afficher les contrôles des DEUX rectangles
-  // même si un seul est sélectionné (solution pour afficher les contrôles individuels)
+  // ===== ÉTAPE 5: Enregistrer l'objet pour l'affichage multi-sélection =====
+  // On stocke le rectangle dans canvas.userData.multiSelectedObjects
+  // Cela permet à l'événement 'after:render' d'afficher les contrôles
   if (!canvas.userData) {
     canvas.userData = {}
   }
   if (!canvas.userData.multiSelectedObjects) {
     canvas.userData.multiSelectedObjects = []
   }
-  canvas.userData.multiSelectedObjects.push(rect1, rect2)
+  canvas.userData.multiSelectedObjects.push(rect)
   
-  // ===== ÉTAPE 8: Activer les contrôles après que l'objet soit ajouté =====
-  // nextTick() attend que Vue.js ait fini de traiter tous les changements
-  // C'est nécessaire car l'événement 'object:added' doit d'abord s'exécuter
-  // nextTick(() => {
-  //   // Pour rect1: appliquer la configuration des contrôles
-  //   if (rect1.userData?.controlsConfig) {
-  //     // Activer/désactiver les contrôles selon la configuration
-  //     rect1.setControlsVisibility(rect1.userData.controlsConfig)
-  //     // S'assurer que chaque contrôle individuel a le bon état visible
-  //     if (rect1.controls) {
-  //       Object.keys(rect1.controls).forEach(key => {
-  //         if (rect1.controls[key] && rect1.userData.controlsConfig[key] !== undefined) {
-  //           rect1.controls[key].visible = rect1.userData.controlsConfig[key]
-  //         }
-  //       })
-  //     }
-  //     // Appliquer la personnalisation (couleur rouge, position, etc.)
-  //     if (rect1.userData?.customizeControls) {
-  //       customizeControls(rect1)
-  //     }
-  //     // Mettre à jour les coordonnées pour positionner correctement les contrôles
-  //     rect1.setCoords()
-  //   }
-    
-  //   // Pour rect2: même processus
-  //   if (rect2.userData?.controlsConfig) {
-  //     rect2.setControlsVisibility(rect2.userData.controlsConfig)
-  //     if (rect2.controls) {
-  //       Object.keys(rect2.controls).forEach(key => {
-  //         if (rect2.controls[key] && rect2.userData.controlsConfig[key] !== undefined) {
-  //           rect2.controls[key].visible = rect2.userData.controlsConfig[key]
-  //         }
-  //       })
-  //     }
-  //     if (rect2.userData?.customizeControls) {
-  //       customizeControls(rect2)
-  //     }
-  //     rect2.setCoords()
-  //   }
-    
-  //   // Sélectionner le premier rectangle (pour afficher ses contrôles par défaut)
-  //   canvas.setActiveObject(rect1)
-  //   // Forcer le rendu pour afficher les contrôles
-  //   canvas.renderAll()
-  // })
-  
-  // ===== ÉTAPE 9: Configuration finale du canvas =====
+  // ===== ÉTAPE 6: Configuration finale du canvas =====
   canvas.isDrawingMode = false  // Désactiver le mode dessin
   isDrawMode.value = false      // Désactiver le mode dessin (variable Vue)
   canvas.selection = true       // Activer la sélection d'objets
@@ -3196,6 +3132,7 @@ defineExpose({
   undo,
   redo,
   deleteSelected,
+  deselectObject,
   addGreenBand,
   addSeamLine,
   addSeamPoint

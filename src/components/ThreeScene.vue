@@ -115,7 +115,7 @@
     </div>
     
     <!-- Liste des meshes de l'objet -->
-    <div v-if="meshesList.length > 0" class="coordinates-display meshes-list">
+    <!-- <div v-if="meshesList.length > 0" class="coordinates-display meshes-list">
       <div class="coord-title">🔷 Meshes de l'Objet ({{ meshesList.length }})</div>
       <div class="meshes-scroll-container">
         <div 
@@ -135,6 +135,38 @@
             </div>
             <div class="mesh-detail-row">
               <span>UVs:</span> {{ meshInfo.hasUVs ? 'Oui' : 'Non' }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div> -->
+    
+    <!-- Liste des éléments du canvas -->
+    <div v-if="allObjectsList.length > 0" class="coordinates-display meshes-list">
+      <div class="coord-title">📦 Éléments du Canvas ({{ allObjectsList.length }})</div>
+      <div class="meshes-scroll-container">
+        <div 
+          v-for="(obj, index) in allObjectsList" 
+          :key="obj.id || index"
+          class="mesh-item canvas-object-item"
+          :class="{ 'active': obj.isSelected }"
+        >
+          <div class="mesh-header">
+            <span class="mesh-name">{{ obj.type || 'unknown' }}</span>
+            <span v-if="obj.isSelected" class="active-badge">✓</span>
+          </div>
+          <div class="mesh-details">
+            <div class="mesh-detail-row">
+              <span>X:</span> {{ obj.left.toFixed(1) }}
+            </div>
+            <div class="mesh-detail-row">
+              <span>Y:</span> {{ obj.top.toFixed(1) }}
+            </div>
+            <div class="mesh-detail-row">
+              <span>L:</span> {{ obj.width.toFixed(1) }}
+            </div>
+            <div class="mesh-detail-row">
+              <span>H:</span> {{ obj.height.toFixed(1) }}
             </div>
           </div>
         </div>
@@ -212,6 +244,7 @@ const emit = defineEmits([
   'model-error',       // Erreur lors du chargement
   'texture-ready',     // Texture partagée prête
   '3d-click',          // Clic sur le modèle 3D
+  '3d-click-outside',  // Clic en dehors du modèle 3D (pour désélectionner)
   'meshes-extracted',  // Liste des meshes extraits
   '3d-drag',           // Glissement sur le modèle 3D
   '3d-drag-start',     // Début du glissement
@@ -906,6 +939,9 @@ const setupClickHandler = () => {
           }, 200)
         }
       }
+    } else {
+      // Clic en dehors du modèle 3D - désélectionner l'objet
+      emit('3d-click-outside', {})
     }
   }
   
@@ -989,7 +1025,6 @@ const loadModel = async (url) => {
 
   try {
     // Remove existing model
-    console.log('currentMesh', currentMesh)
     if (currentMesh) {
       scene.remove(currentMesh)
       if (currentMesh.geometry) currentMesh.geometry.dispose()
@@ -1220,7 +1255,6 @@ const loadModel = async (url) => {
     allMeshes = []
     meshesList.value = []
     let meshIndex = 0
-    console.log('🔍 [DEBUG] Extraction des meshes du modèle...')
     obj.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         allMeshes.push(child)
@@ -1253,37 +1287,11 @@ const loadModel = async (url) => {
           uvRange: uvRange
         }
         meshesList.value.push(meshInfo)
-        
-        console.log(`📦 [DEBUG] Mesh ${meshIndex} trouvé:`, {
-          name: meshInfo.name,
-          vertices: vertexCount,
-          hasUVs: hasUVs,
-          uvRange: uvRange,
-          material: child.material ? (Array.isArray(child.material) ? `${child.material.length} matériaux` : '1 matériau') : 'aucun',
-          hasTexture: child.material && (Array.isArray(child.material) 
-            ? child.material.some(m => m && m.map) 
-            : child.material.map)
-        })
-        
-        // Log détaillé sur les UVs pour comprendre la couture
-        if (uvRange) {
-          const hasSeam = uvRange.minU < 0.1 || uvRange.maxU > 0.9
-          console.log(`  🔍 [DEBUG] Analyse UVs du mesh ${meshIndex}:`, {
-            minU: uvRange.minU.toFixed(4),
-            maxU: uvRange.maxU.toFixed(4),
-            range: uvRange.range.toFixed(4),
-            hasSeam: hasSeam,
-            seamLocation: hasSeam ? (uvRange.minU < 0.1 ? 'U=0 (début)' : 'U=1 (fin)') : 'Aucune couture détectée',
-            note: hasSeam ? '⚠️ La couture est visible car les UVs vont de 0 à 1' : '✅ Pas de couture visible'
-          })
-        }
       }
     })
     
-    console.log(`✅ [DEBUG] Total: ${allMeshes.length} mesh(es) trouvé(s)`)
     emit('model-loaded', obj)
-    emit('meshes-extracted', allMeshes)
-    console.log('📋 [DEBUG] allMeshes array:', allMeshes) 
+    emit('meshes-extracted', allMeshes) 
 
     // Si un canvas 2D est fourni, configurer la texture partagée
     // Attendre un peu pour s'assurer que tout est prêt
@@ -1305,135 +1313,49 @@ const loadModel = async (url) => {
  */
 const setupSharedCanvasTexture = (htmlCanvas) => {
   if (!htmlCanvas || !currentMesh) {
-    console.warn('⚠️ [DEBUG] setupSharedCanvasTexture: htmlCanvas ou currentMesh manquant', {
-      hasCanvas: !!htmlCanvas,
-      hasMesh: !!currentMesh,
-      canvasSize: htmlCanvas ? `${htmlCanvas.width}x${htmlCanvas.height}` : 'N/A'
-    })
     return
   }
 
   try {
-    console.log('🎨 [DEBUG] setupSharedCanvasTexture - Début')
-    console.log('📐 [DEBUG] Canvas dimensions:', {
-      width: htmlCanvas.width,
-      height: htmlCanvas.height,
-      clientWidth: htmlCanvas.clientWidth,
-      clientHeight: htmlCanvas.clientHeight
-    })
-    
     // Récupérer tous les matériaux du mesh
     const materials = []
     let meshCount = 0
     currentMesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         meshCount++
-        console.log(`🔷 [DEBUG] Traitement mesh ${meshCount}:`, {
-          name: child.name || `Mesh_${meshCount}`,
-          hasGeometry: !!child.geometry,
-          hasUVs: child.geometry && !!child.geometry.attributes.uv,
-          materialType: Array.isArray(child.material) ? 'Array' : typeof child.material,
-          materialCount: Array.isArray(child.material) ? child.material.length : 1
-        })
         
         // Assurer les UVs
         if (child.geometry && !child.geometry.attributes.uv) {
-          console.log(`  ⚠️ [DEBUG] Génération des UVs pour mesh ${meshCount}`)
           generateUVs(child.geometry)
         }
         
         if (Array.isArray(child.material)) {
-          console.log(`  📦 [DEBUG] Mesh ${meshCount} a ${child.material.length} matériaux`)
           materials.push(...child.material)
         } else if (child.material) {
-          console.log(`  📦 [DEBUG] Mesh ${meshCount} a 1 matériau`)
           materials.push(child.material)
         }
       }
     })
     
-    console.log(`📊 [DEBUG] Total: ${meshCount} mesh(es), ${materials.length} matériau(x) à traiter`)
-
     // Si une texture existe déjà, la supprimer avant d'en créer une nouvelle
     if (canvasTexture) {
-      console.log('🗑️ [DEBUG] Suppression de l\'ancienne texture')
       canvasTexture.dispose()
       canvasTexture = null
     }
     
     // Créer et configurer la texture
-    console.log('🖼️ [DEBUG] Création de la texture depuis le canvas...')
     canvasTexture = setupCanvasTexture(htmlCanvas, materials)
     
     if (!canvasTexture) {
-      console.error('❌ [DEBUG] Échec de la création de la texture')
       return
     }
     
-    console.log('✅ [DEBUG] Texture créée:', {
-      width: canvasTexture.image?.width || 'N/A',
-      height: canvasTexture.image?.height || 'N/A',
-      format: canvasTexture.format,
-      wrapS: canvasTexture.wrapS,
-      wrapT: canvasTexture.wrapT,
-      wrapSName: canvasTexture.wrapS === THREE.ClampToEdgeWrapping ? 'ClampToEdge' : 
-                  canvasTexture.wrapS === THREE.RepeatWrapping ? 'Repeat' : 
-                  canvasTexture.wrapS === THREE.MirroredRepeatWrapping ? 'MirroredRepeat' : 'Unknown',
-      wrapTName: canvasTexture.wrapT === THREE.ClampToEdgeWrapping ? 'ClampToEdge' : 
-                  canvasTexture.wrapT === THREE.RepeatWrapping ? 'Repeat' : 
-                  canvasTexture.wrapT === THREE.MirroredRepeatWrapping ? 'MirroredRepeat' : 'Unknown'
-    })
-    
-    // Vérifier les UVs de tous les meshes après création de la texture
-    console.log('🔍 [DEBUG] Vérification des UVs après création de texture:')
-    currentMesh.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.geometry && child.geometry.attributes.uv) {
-        const uvArray = child.geometry.attributes.uv.array
-        let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
-        for (let i = 0; i < uvArray.length; i += 2) {
-          minU = Math.min(minU, uvArray[i])
-          maxU = Math.max(maxU, uvArray[i])
-          minV = Math.min(minV, uvArray[i + 1])
-          maxV = Math.max(maxV, uvArray[i + 1])
-        }
-        console.log(`  📐 Mesh "${child.name || 'Unnamed'}":`, {
-          U: `[${minU.toFixed(4)}, ${maxU.toFixed(4)}]`,
-          V: `[${minV.toFixed(4)}, ${maxV.toFixed(4)}]`,
-          seamAtU0: minU < 0.01,
-          seamAtU1: maxU > 0.99,
-          explanation: (minU < 0.01 || maxU > 0.99) 
-            ? '⚠️ Couture visible: Les UVs touchent les bords (U=0 ou U=1)' 
-            : '✅ Pas de couture: Les UVs sont dans la plage 0.01-0.99'
-        })
-      }
-    })
-    
     // Appliquer sur tous les meshes
-    console.log('🔧 [DEBUG] Application de la texture sur tous les meshes...')
     applyTextureToMesh(currentMesh, canvasTexture)
     
-    // Vérifier que la texture a bien été appliquée
-    let appliedCount = 0
-    currentMesh.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach(mat => {
-            if (mat && mat.map === canvasTexture) {
-              appliedCount++
-            }
-          })
-        } else if (child.material && child.material.map === canvasTexture) {
-          appliedCount++
-        }
-      }
-    })
-    console.log(`✅ [DEBUG] Texture appliquée sur ${appliedCount} matériau(x)`)
-    
     emit('texture-ready', canvasTexture)
-    console.log('🎉 [DEBUG] setupSharedCanvasTexture - Terminé avec succès')
     
   } catch (error) {
-    console.error('❌ [DEBUG] Erreur dans setupSharedCanvasTexture:', error)
   }
 }
 
@@ -1725,7 +1647,7 @@ const applyTexture = (texture) => {
     return
   }
 
-  texture.flipY = false
+  texture.flipY = true  // Inverser verticalement pour correspondre à l'orientation du modèle 3D
   texture.needsUpdate = true
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
@@ -2206,6 +2128,28 @@ const updateObjectsListFromCanvas = (objects) => {
 }
 
 // Expose methods for parent component
+/**
+ * Fait tourner le modèle 3D selon l'angle de rotation d'un élément 2D
+ * @param {number} angleDegrees - Angle de rotation en degrés (de Fabric.js)
+ */
+const rotateModel = (angleDegrees) => {
+  if (!currentMesh) return
+  
+  // Convertir l'angle de degrés en radians
+  // L'angle dans Fabric.js est dans le sens horaire, on le convertit pour Three.js
+  const angleRadians = THREE.MathUtils.degToRad(angleDegrees)
+  
+  // Faire tourner le modèle autour de l'axe Y (vertical)
+  // On utilise rotation.y pour faire tourner le modèle horizontalement
+  currentMesh.rotation.y = angleRadians
+  
+  // Mettre à jour les contrôles pour que la caméra suive la rotation
+  if (controls) {
+    // Optionnel : faire tourner aussi la caméra pour suivre le modèle
+    // controls.update()
+  }
+}
+
 defineExpose({
   getCurrentMesh: () => currentMesh,
   applyTexture,
@@ -2227,6 +2171,7 @@ defineExpose({
   updateSelectedObjectCoords,
   updateObjectsListFromCanvas,
   createSeamlessGoblet,
+  rotateModel,
   renderer,
   emit
 })
@@ -2465,6 +2410,42 @@ defineExpose({
   backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
+}
+
+/* Styles pour la liste des objets du canvas */
+.canvas-objects-list {
+  position: absolute;
+  top: 20px;
+  left: 360px; /* Positionné à droite de la liste des meshes */
+  background: rgba(59, 130, 246, 0.9);
+  border: 2px solid #3b82f6;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 320px;
+  max-height: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-objects-list .coord-title {
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.canvas-object-item {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.canvas-object-item.active {
+  background: rgba(255, 255, 255, 0.2);
+  border-left-color: #fff;
 }
 
 .meshes-list .coord-title {

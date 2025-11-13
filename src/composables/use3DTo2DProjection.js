@@ -75,10 +75,14 @@ export const UVToCanvasCoords = (uv, canvasWidth, canvasHeight, workZoneTop = 0,
   // Convertir UV (0-1) en coordonnées canvas (pixels)
   // U est directement converti en X (horizontal)
   // V normalisé est converti en Y (vertical)
-  // Les UVs sont déjà inversées dans la génération, donc on ne les inverse plus ici
+  // IMPORTANT: Avec flipY=true sur la texture, les coordonnées Y sont inversées
+  // Dans les UVs générées: V=0 est en haut du modèle, V=1 est en bas
+  // Dans le canvas: Y=0 est en haut, Y=height est en bas
+  // Avec flipY=true: il faut inverser Y pour que draguer vers le haut sur le modèle
+  // fasse bouger l'élément vers le haut sur le canvas
   return {
     x: uv.u * canvasWidth,
-    y: normalizedV * canvasHeight
+    y: (1 - normalizedV) * canvasHeight
   }
 }
 

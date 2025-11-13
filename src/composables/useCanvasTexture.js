@@ -88,7 +88,7 @@ export const setupCanvasTexture = (canvas, materials) => {
   texture.minFilter = THREE.LinearFilter      // Filtre pour le minification (zoom out)
   texture.magFilter = THREE.LinearFilter      // Filtre pour le magnification (zoom in)
   texture.generateMipmaps = false             // Pas de mipmaps pour les canvas (performance)
-  texture.flipY = false                       // Ne pas inverser verticalement (canvas 2D)
+  texture.flipY = true                        // Inverser verticalement pour correspondre à l'orientation du modèle 3D
   texture.wrapS = THREE.ClampToEdgeWrapping   // Répétition horizontale : clamp
   texture.wrapT = THREE.ClampToEdgeWrapping   // Répétition verticale : clamp
   texture.format = THREE.RGBAFormat          // Format RGBA (avec transparence)

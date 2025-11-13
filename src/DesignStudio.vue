@@ -74,6 +74,7 @@
           @model-error="onModelError"
           @texture-ready="onTextureReady"
           @3d-click="on3DClickForPlacement"
+          @3d-click-outside="on3DClickOutside"
           @3d-drag="on3DDrag"
           @3d-drag-start="on3DDragStart"
           @3d-drag-end="on3DDragEnd"
@@ -97,8 +98,7 @@
           <div class="control-group">
             <label>Configuration de la zone personnalisable</label>
             
-            <!-- Configuration par dimensions réelles -->
-            <div class="config-section">
+            <!-- <div class="config-section">
               <label class="slider-label">
                 Hauteur totale du gobelet (cm):
                 <input 
@@ -131,10 +131,10 @@
                   <option value="bottom">En bas</option>
                 </select>
               </label>
-            </div>
+            </div> -->
             
-            <!-- Affichage des zones calculées -->
-            <div class="slider-group">
+            <!-- Afficage des zones calculées -->
+            <!-- <div class="slider-group">
               <label class="slider-label">
                 Exclure haut:
                 <input 
@@ -167,7 +167,7 @@
               <small>{{ workZoneTop }}% haut exclu, {{ workZoneBottom }}% bas exclu</small>
               <br>
               <small><strong>Canvas 2D:</strong> {{ canvasWidth }}x{{ canvasHeight }} pixels (correspond à {{ customizableHeightCm }} cm)</small>
-            </div>
+            </div> -->
           </div>
         </div>
         
@@ -184,6 +184,7 @@
           @object-deselected="onObjectDeselected"
           @move-object="onMoveObject"
           @objects-changed="updateAllObjectsList"
+          @object-rotated="onObjectRotated"
         />
       </div>
     </div>
@@ -768,6 +769,34 @@ const onObjectDeselected = () => {
 }
 
 /**
+ * Gère le clic en dehors du modèle 3D
+ * Désélectionne l'objet actuellement sélectionné
+ */
+const on3DClickOutside = () => {
+  console.log('Clic en dehors du modèle 3D - Désélection')
+  
+  // Désélectionner l'objet dans FabricDesigner
+  if (fabricDesignerRef.value && fabricDesignerRef.value.deselectObject) {
+    fabricDesignerRef.value.deselectObject()
+  }
+  
+  // Mettre à jour l'état local
+  selectedObject.value = null
+  dragMode.value = false
+  isDragging.value = false
+  
+  // Désactiver le mode drag dans ThreeScene
+  if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+    threeSceneRef.value.setDragMode(false)
+  }
+  
+  // Masquer les coordonnées de l'objet sélectionné
+  if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+    threeSceneRef.value.updateSelectedObjectCoords(null)
+  }
+}
+
+/**
  * Met à jour la liste de tous les objets dans ThreeScene
  */
 const updateAllObjectsList = () => {
@@ -799,6 +828,21 @@ const onMoveObject = (data) => {
   console.log('Objet déplacé:', data)
   // Mettre à jour la liste des objets après déplacement
   updateAllObjectsList()
+}
+
+/**
+ * Gère la rotation d'un objet sur le canvas 2D
+ * Applique la rotation au modèle 3D
+ */
+const onObjectRotated = (data) => {
+  if (!data || !data.angle) return
+  
+  console.log('Objet roté:', data.angle, 'degrés')
+  
+  // Appliquer la rotation au modèle 3D
+  if (threeSceneRef.value && threeSceneRef.value.rotateModel) {
+    threeSceneRef.value.rotateModel(data.angle)
+  }
 }
 
 // Variables pour le redimensionnement

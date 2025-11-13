@@ -2229,7 +2229,6 @@ const placeCircleAt = (x, y) => {
   requestTextureUpdate()
   emit('design-updated', canvas)
 }
-
 /**
  * Crée un rectangle centré à la position (x, y) et configure ses contrôles
  * 

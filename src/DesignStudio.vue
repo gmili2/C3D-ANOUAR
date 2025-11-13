@@ -404,7 +404,6 @@ const handleFileUpload = async (event) => {
  * @param {THREE.Object3D} mesh - Le modèle 3D chargé (groupe de meshes)
  */
 const onModelLoaded = async (mesh) => {
-  console.log('Modèle 3D chargé avec succès', mesh)
   errorMessage.value = ''
   
   // Extraire tous les meshes individuels du modèle pour l'inspection/édition
@@ -422,8 +421,6 @@ const onModelLoaded = async (mesh) => {
   })
   
   if (!hasUVs) {
-    console.log('ℹ️ Le modèle n\'a pas de coordonnées UV. Les UVs seront générées automatiquement.')
-    // Ne pas afficher d'erreur, juste informer dans la console
     // Les UVs seront générées automatiquement dans ThreeScene
   }
   
@@ -486,12 +483,6 @@ const extractModelMeshes = (obj) => {
       })
     }
   })
-  
-  console.log(`✅ ${modelMeshes.value.length} pièce(s) trouvée(s) dans le modèle:`, modelMeshes.value.map(m => ({
-    name: m.name,
-    vertices: m.vertexCount,
-    hasUVs: m.hasUVs
-  })))
 }
 
 const onMeshSelected = ({ index, mesh }) => {
@@ -527,11 +518,9 @@ const onMeshEdit = ({ index, mesh }) => {
   if (threeSceneRef.value && threeSceneRef.value.setActiveMesh) {
     threeSceneRef.value.setActiveMesh(mesh)
   }
-  console.log(`Édition activée pour: ${mesh.name || `Mesh ${index + 1}`}`)
 }
 
 const onTextureReady = (texture) => {
-  console.log('Texture partagée prête', texture)
   appliedTexture.value = texture
 }
 
@@ -562,7 +551,6 @@ const onTextureReady = (texture) => {
  */
 const toggleSeamLine = () => {
   if (!fabricDesignerRef.value || !fabricDesignerRef.value.addSeamLine) {
-    console.warn('FabricDesigner non disponible')
     return
   }
   
@@ -574,13 +562,11 @@ const toggleSeamLine = () => {
 
 const createSeamlessGoblet = () => {
   if (!threeSceneRef.value || !threeSceneRef.value.createSeamlessGoblet) {
-    console.warn('ThreeScene non disponible')
     return
   }
   
   const success = threeSceneRef.value.createSeamlessGoblet()
   if (success) {
-    console.log('✅ Gobelet sans couture créé avec succès')
     // Réappliquer la texture du canvas si elle existe
     if (fabricCanvasElement.value && threeSceneRef.value.setupSharedCanvasTexture) {
       nextTick(() => {
@@ -588,7 +574,6 @@ const createSeamlessGoblet = () => {
       })
     }
   } else {
-    console.error('❌ Erreur lors de la création du gobelet sans couture')
     errorMessage.value = 'Erreur lors de la création du gobelet sans couture'
     setTimeout(() => {
       errorMessage.value = ''
@@ -601,7 +586,6 @@ const on3DClickForPlacement = (clickData) => {
   // Les clics hors zone retournent null
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
       clickData.canvasX === null || clickData.canvasY === null) {
-    console.warn('⚠️ Clic hors zone de travail')
     return
   }
   
@@ -612,11 +596,6 @@ const on3DClickForPlacement = (clickData) => {
   
   // Si le clic est sur la couture, ajouter un point vert
   if (isOnSeam && clickData.uv) {
-    console.log('🟢 Clic sur la couture - Ajout d\'un point vert:', {
-      uvU: uvU.toFixed(4),
-      canvasX: clickData.canvasX,
-      canvasY: clickData.canvasY
-    })
     
     if (fabricDesignerRef.value && fabricDesignerRef.value.addSeamPoint) {
       fabricDesignerRef.value.addSeamPoint(clickData.canvasX, clickData.canvasY)
@@ -629,10 +608,6 @@ const on3DClickForPlacement = (clickData) => {
   
   // Si on est en mode placement, placer un nouvel élément
   if (placementMode.value && placementType.value) {
-    console.log('🎯 Placement direct sur modèle 3D:', {
-      type: placementType.value,
-      position: clickData.canvasX + ', ' + clickData.canvasY
-    })
     
     // Placer l'élément sur le canvas 2D à la position correspondante du clic 3D
     if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
@@ -647,56 +622,25 @@ const on3DClickForPlacement = (clickData) => {
   }
   
   // Sinon, sélectionner l'objet à cette position sur le modèle 3D
-  console.log('🖱️ Clic sur modèle 3D - Tentative de sélection:', {
-    canvasX: clickData.canvasX,
-    canvasY: clickData.canvasY,
-    hasFabricDesigner: !!fabricDesignerRef.value,
-    hasSelectMethod: !!(fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition)
-  })
-  
   if (fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition) {
-    // Vérifier d'abord s'il y a des objets sur le canvas
-    const canvas = fabricDesignerRef.value.getCanvas()
-    if (canvas) {
-      const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
-      console.log('📦 Objets sur le canvas:', objects.length, objects.map(obj => ({
-        type: obj.type,
-        left: obj.left,
-        top: obj.top,
-        width: obj.width,
-        height: obj.height
-      })))
-    }
-    
     const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)
     if (found) {
-      console.log('✅ Objet sélectionné depuis le modèle 3D à la position:', {
-        x: clickData.canvasX,
-        y: clickData.canvasY
-      })
       // Activer le mode drag après sélection pour pouvoir déplacer immédiatement
       dragMode.value = true
       if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
         threeSceneRef.value.setDragMode(true)
       }
     } else {
-      console.log('ℹ️ Aucun objet trouvé à cette position sur le modèle 3D:', {
-        x: clickData.canvasX,
-        y: clickData.canvasY
-      })
       // Désactiver le mode drag si aucun objet n'est trouvé
       dragMode.value = false
       if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
         threeSceneRef.value.setDragMode(false)
       }
     }
-  } else {
-    console.warn('⚠️ FabricDesigner ou méthode selectObjectAtPosition non disponible')
   }
 }
 
 const onModelError = (error) => {
-  console.error('Erreur lors du chargement du modèle:', error)
   errorMessage.value = `Erreur lors du chargement: ${error.message}`
   uploadedModel.value = null
   workZoneTop.value = 10
@@ -708,17 +652,11 @@ const onWorkZoneChanged = () => {
   if (threeSceneRef.value && threeSceneRef.value.updateWorkZone) {
     threeSceneRef.value.updateWorkZone(workZoneTop.value / 100, workZoneBottom.value / 100)
   }
-  console.log('Zone de travail mise à jour:', {
-    top: workZoneTop.value + '%',
-    bottom: workZoneBottom.value + '%',
-    active: (100 - workZoneTop.value - workZoneBottom.value) + '%'
-  })
 }
 
 const onPlacementModeChanged = (modeData) => {
   placementMode.value = modeData.active
   placementType.value = modeData.type
-  console.log('Mode placement changé:', modeData)
   
   // Mettre à jour le curseur du modèle 3D si nécessaire
   if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
@@ -730,7 +668,6 @@ const onPlacementModeChanged = (modeData) => {
 const selectedObject = ref(null)
 
 const onObjectSelected = (data) => {
-  console.log('Objet sélectionné dans Fabric:', data)
   selectedObject.value = data.object
   dragMode.value = true
   
@@ -749,7 +686,6 @@ const onObjectSelected = (data) => {
 }
 
 const onObjectDeselected = () => {
-  console.log('Objet désélectionné dans Fabric')
   selectedObject.value = null
   dragMode.value = false
   isDragging.value = false
@@ -773,7 +709,6 @@ const onObjectDeselected = () => {
  * Désélectionne l'objet actuellement sélectionné
  */
 const on3DClickOutside = () => {
-  console.log('Clic en dehors du modèle 3D - Désélection')
   
   // Désélectionner l'objet dans FabricDesigner
   if (fabricDesignerRef.value && fabricDesignerRef.value.deselectObject) {
@@ -825,7 +760,6 @@ const updateAllObjectsList = () => {
 
 const onMoveObject = (data) => {
   // Cette fonction peut être utilisée pour des actions supplémentaires
-  console.log('Objet déplacé:', data)
   // Mettre à jour la liste des objets après déplacement
   updateAllObjectsList()
 }
@@ -836,8 +770,6 @@ const onMoveObject = (data) => {
  */
 const onObjectRotated = (data) => {
   if (!data || !data.angle) return
-  
-  console.log('Objet roté:', data.angle, 'degrés')
   
   // Appliquer la rotation au modèle 3D
   if (threeSceneRef.value && threeSceneRef.value.rotateModel) {
@@ -895,7 +827,6 @@ const on3DDragStart = (clickData) => {
           threeSceneRef.value.setDragState(true)
         }
         
-        console.log('📏 Début du redimensionnement sur 3D:', handleInfo)
         return
       }
     }
@@ -949,8 +880,6 @@ const on3DDragStart = (clickData) => {
   if (threeSceneRef.value && threeSceneRef.value.setDragState) {
     threeSceneRef.value.setDragState(true)
   }
-  
-  console.log('🎯 Début du drag sur 3D:', clickData, 'Offset:', dragOffset.value)
 }
 
 /**
@@ -1074,8 +1003,6 @@ const on3DHover = (hoverData) => {
           if (element.style.cursor !== cursor) {
             element.style.cursor = cursor
           }
-          
-          console.log('🎯 Curseur changé:', cursor, 'pour handle:', handleInfo.handle || handleInfo.corner || handleInfo.edge, handleInfo)
         }
       }
     } else {
@@ -1104,7 +1031,6 @@ const on3DResizeStart = (resizeData) => {
   isResizing.value = true
   resizeStartPos.value = { x: resizeData.canvasX, y: resizeData.canvasY }
   currentResizeHandle.value = resizeData.handleInfo
-  console.log('📏 Début du redimensionnement depuis 3D:', resizeData)
 }
 
 /**
@@ -1172,8 +1098,6 @@ const on3DResizeEnd = () => {
     const defaultCursor = dragMode.value ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }
-  
-  console.log('📏 Fin du redimensionnement depuis 3D')
 }
 
 /**
@@ -1203,8 +1127,6 @@ const on3DDragEnd = () => {
     const defaultCursor = dragMode.value ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }
-  
-  console.log('🎯 Fin du drag sur 3D')
 }
 
 /**
@@ -1224,17 +1146,12 @@ const on3DScale = (scaleData) => {
   
   const canvas = fabricDesignerRef.value.getCanvas()
   if (!canvas || !canvas.getActiveObject()) {
-    console.warn('⚠️ Aucun objet sélectionné pour le redimensionnement')
     return
   }
   
   // Redimensionner l'objet sélectionné sur le canvas 2D
   if (fabricDesignerRef.value.scaleSelectedObject) {
     fabricDesignerRef.value.scaleSelectedObject(scaleData.scaleFactor)
-    console.log('📏 Redimensionnement depuis 3D:', {
-      scaleFactor: scaleData.scaleFactor,
-      objectType: canvas.getActiveObject()?.type
-    })
   }
 }
 
@@ -1247,7 +1164,6 @@ const onDesignUpdated = () => {
 }
 
 const onFabricCanvasReady = (htmlCanvas) => {
-  console.log('Canvas Fabric.js prêt', htmlCanvas)
   fabricCanvasElement.value = htmlCanvas
   
   // Si le modèle est déjà chargé, configurer la texture partagée
@@ -1270,7 +1186,6 @@ const updateTextureRealTime = () => {
     
     const canvasTexture = fabricDesignerRef.value.getCanvasAsTexture()
     if (!canvasTexture) {
-      console.warn('Impossible de créer la texture depuis le canvas')
       return
     }
     
@@ -1295,10 +1210,7 @@ const updateTextureRealTime = () => {
       if (threeSceneRef.value.applyTexture) {
         threeSceneRef.value.applyTexture(texture)
       }
-      
-      console.log('Texture mise à jour en temps réel')
     } catch (error) {
-      console.error('Erreur lors de la mise à jour en temps réel:', error)
     }
   }, 200) // Debounce de 200ms pour laisser le temps au canvas de se rendre
 }
@@ -1355,10 +1267,8 @@ const applyDesignToModel = async () => {
       threeSceneRef.value.applyTexture(texture)
     }
 
-    console.log('Design appliqué avec succès sur le modèle 3D')
     errorMessage.value = ''
   } catch (error) {
-    console.error('Erreur lors de l\'application du design:', error)
     errorMessage.value = `Erreur: ${error.message}`
   }
 }
@@ -1375,7 +1285,6 @@ onMounted(async () => {
     
     const response = await fetch(objUrl)
     if (!response.ok) {
-      console.warn('Impossible de charger le modèle par défaut depuis downloadSvg3.obj')
       return
     }
     
@@ -1386,10 +1295,7 @@ onMounted(async () => {
     await nextTick()
     
     uploadedModel.value = file
-    console.log('✅ Modèle par défaut chargé: downloadSvg3.obj')
   } catch (error) {
-    console.warn('⚠️ Impossible de charger le modèle par défaut:', error)
-    // Ne pas afficher d'erreur à l'utilisateur, juste un log
   }
 })
 </script>

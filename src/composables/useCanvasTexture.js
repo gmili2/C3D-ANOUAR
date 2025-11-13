@@ -144,19 +144,8 @@ export const updateTexture = (texture) => {
  */
 export const applyTextureToMesh = (mesh, texture) => {
   if (!mesh || !texture) {
-    console.warn('⚠️ [DEBUG] applyTextureToMesh: mesh ou texture manquant', {
-      hasMesh: !!mesh,
-      hasTexture: !!texture
-    })
     return
   }
-
-  console.log('🎨 [DEBUG] applyTextureToMesh - Début')
-  console.log('📐 [DEBUG] Texture à appliquer:', {
-    width: texture.image?.width || 'N/A',
-    height: texture.image?.height || 'N/A',
-    uuid: texture.uuid
-  })
 
   let meshCount = 0
   let materialCount = 0
@@ -166,11 +155,9 @@ export const applyTextureToMesh = (mesh, texture) => {
     if (child instanceof THREE.Mesh) {
       meshCount++
       const meshName = child.name || `Mesh_${meshCount}`
-      console.log(`  🔷 [DEBUG] Application sur ${meshName}...`)
       
       // Cas 1: Matériau est un tableau (multi-matériaux)
       if (Array.isArray(child.material)) {
-        console.log(`    📦 [DEBUG] ${meshName} a ${child.material.length} matériaux`)
         child.material.forEach((mat, idx) => {
           materialCount++
           if (mat instanceof THREE.MeshStandardMaterial || 
@@ -189,7 +176,6 @@ export const applyTextureToMesh = (mesh, texture) => {
               transparent: true, // Rendre transparent
               opacity: 0.3 // Niveau de transparence
             })
-            console.log(`    🔄 [DEBUG] Matériau ${idx + 1}/${child.material.length} recréé`)
           }
         })
       } else {

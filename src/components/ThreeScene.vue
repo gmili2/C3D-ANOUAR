@@ -620,27 +620,16 @@ const setupClickHandler = () => {
     if (intersects.length > 0) {
       const intersection = intersects[0]
       if (intersection.uv) {
-        // IMPORTANT: Utiliser les dimensions de la texture car c'est ce qui est réellement appliqué
-        // La texture peut avoir des dimensions différentes du canvas HTML à cause du devicePixelRatio
-        let canvasWidth = props.canvas2D.width || 800
-        let canvasHeight = props.canvas2D.height || 600
+        // IMPORTANT: Toujours utiliser les dimensions LOGIQUES du canvas (props.canvas2D.width/height)
+        // et non les dimensions de la texture, car les coordonnées UV sont normalisées (0-1)
+        // et doivent être converties en pixels selon les dimensions logiques du canvas Fabric.js
+        // Les dimensions de la texture peuvent être différentes à cause du devicePixelRatio,
+        // mais cela n'affecte pas le mapping UV qui est toujours basé sur les dimensions logiques
+        const canvasWidth = props.canvas2D.width || 800
+        const canvasHeight = props.canvas2D.height || 600
         
-        // Si une texture existe, utiliser ses dimensions car c'est ce qui est réellement mappé sur le modèle 3D
-        if (canvasTexture && canvasTexture.image) {
-          const textureWidth = canvasTexture.image.width
-          const textureHeight = canvasTexture.image.height
-          
-          // Les dimensions de la texture sont les dimensions réelles utilisées pour le mapping UV
-          canvasWidth = textureWidth
-          canvasHeight = textureHeight
-          
-          // Log si les dimensions diffèrent pour déboguer
-          if (textureWidth !== props.canvas2D.width || textureHeight !== props.canvas2D.height) {
-          }
-        }
-        
-        // Utiliser les dimensions de la texture pour la projection
-        // car c'est ce qui correspond au mapping UV réel sur le modèle 3D
+        // Utiliser les dimensions logiques du canvas pour la projection
+        // Les coordonnées UV (0-1) sont converties en pixels selon ces dimensions
         const canvasCoords = project3DClickToCanvas(
           intersection,
           canvasWidth,
@@ -830,17 +819,11 @@ const setupClickHandler = () => {
       // Vérifier si l'intersection a des UVs
       if (intersection.uv) {
         // Convertir le clic 3D en coordonnées canvas 2D avec zone de travail
-        // IMPORTANT: Utiliser les dimensions de la texture car c'est ce qui est réellement mappé
-        let canvasWidth = props.canvas2D ? props.canvas2D.width : 800
-        let canvasHeight = props.canvas2D ? props.canvas2D.height : 600
-        
-        // Si une texture existe, utiliser ses dimensions (peut différer à cause du devicePixelRatio)
-        if (canvasTexture && canvasTexture.image) {
-          canvasWidth = canvasTexture.image.width
-          canvasHeight = canvasTexture.image.height
-        }
-        
-        // Log pour déboguer
+        // IMPORTANT: Toujours utiliser les dimensions LOGIQUES du canvas
+        // Les coordonnées UV sont normalisées (0-1) et doivent être converties
+        // selon les dimensions logiques du canvas Fabric.js, pas les dimensions de la texture
+        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
         
         const canvasCoords = project3DClickToCanvas(
           intersection,

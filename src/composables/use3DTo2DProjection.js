@@ -80,9 +80,19 @@ export const UVToCanvasCoords = (uv, canvasWidth, canvasHeight, workZoneTop = 0,
   // Dans le canvas: Y=0 est en haut, Y=height est en bas
   // Avec flipY=true: il faut inverser Y pour que draguer vers le haut sur le modèle
   // fasse bouger l'élément vers le haut sur le canvas
+  // 
+  // CORRECTION: Tenir compte du décalage des zones de travail
+  // La zone active commence à workZoneTop * canvasHeight pixels du haut
+  const activeZoneTopPx = workZoneTop * canvasHeight
+  const activeZoneBottomPx = (1 - workZoneBottom) * canvasHeight
+  const activeZoneHeightPx = activeZoneBottomPx - activeZoneTopPx
+  
+  // normalizedV = 0 → haut de la zone active UV → bas de la zone active canvas (avec flipY)
+  // normalizedV = 1 → bas de la zone active UV → haut de la zone active canvas (avec flipY)
+  // Donc: y = activeZoneBottomPx - normalizedV * activeZoneHeightPx
   return {
     x: uv.u * canvasWidth,
-    y: (1 - normalizedV) * canvasHeight
+    y: activeZoneBottomPx - normalizedV * activeZoneHeightPx
   }
 }
 

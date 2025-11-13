@@ -83,7 +83,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern } from 'fabric'
+import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern, ActiveSelection } from 'fabric'
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
 
 // ===== ÉVÉNEMENTS ÉMIS =====
@@ -93,7 +93,8 @@ const emit = defineEmits([
   'placement-mode-changed',  // Le mode placement a changé
   'object-selected',         // Un objet a été sélectionné
   'object-deselected',       // Aucun objet n'est sélectionné
-  'move-object'              // Un objet a été déplacé
+  'move-object',             // Un objet a été déplacé
+  'objects-changed'          // La liste des objets a changé (ajout/suppression)
 ])
 
 // ===== PROPS =====
@@ -243,6 +244,22 @@ const removeWrapAroundCopies = (obj) => {
   
   const copies = wrapAroundCopies.get(original)
   if (copies) {
+    // Retirer les copies de la liste des objets multi-sélectionnés avant de les supprimer
+    if (canvas.userData?.multiSelectedObjects) {
+      copies.forEach(copy => {
+        const index = canvas.userData.multiSelectedObjects.indexOf(copy)
+        if (index > -1) {
+          canvas.userData.multiSelectedObjects.splice(index, 1)
+        }
+      })
+      // Retirer aussi l'original de la liste s'il n'a plus de copies
+      const index = canvas.userData.multiSelectedObjects.indexOf(original)
+      if (index > -1) {
+        canvas.userData.multiSelectedObjects.splice(index, 1)
+      }
+    }
+    
+    // Supprimer les copies du canvas
     copies.forEach(copy => {
       canvas.remove(copy)
     })
@@ -435,7 +452,7 @@ const syncCopyWithOriginal = (copy) => {
   const wasEvented = original.evented
   original.evented = false
   
-  // Mettre à jour l'original avec toutes les propriétés de la copie
+  // Mettre à jour l'original avec TOUTES les propriétés de la copie (synchronisation complète)
   original.set({
     left: newOriginalLeft,
     top: newOriginalTop,
@@ -443,7 +460,33 @@ const syncCopyWithOriginal = (copy) => {
     scaleY: copy.scaleY || original.scaleY,
     angle: copy.angle || original.angle,
     flipX: copy.flipX || original.flipX,
-    flipY: copy.flipY || original.flipY
+    flipY: copy.flipY || original.flipY,
+    // Synchroniser les propriétés visuelles
+    fill: copy.fill,
+    stroke: copy.stroke,
+    strokeWidth: copy.strokeWidth,
+    opacity: copy.opacity,
+    shadow: copy.shadow,
+    // Synchroniser les propriétés de transformation
+    skewX: copy.skewX,
+    skewY: copy.skewY,
+    // Synchroniser les propriétés spécifiques selon le type
+    ...(original.type === 'rect' && {
+      rx: copy.rx,
+      ry: copy.ry
+    }),
+    ...(original.type === 'circle' && {
+      radius: copy.radius
+    }),
+    ...(original.type === 'textbox' && {
+      text: copy.text,
+      fontSize: copy.fontSize,
+      fontFamily: copy.fontFamily,
+      fontWeight: copy.fontWeight,
+      fontStyle: copy.fontStyle,
+      textAlign: copy.textAlign,
+      lineHeight: copy.lineHeight
+    })
   })
   original.setCoords()
   
@@ -486,6 +529,73 @@ const cloneFabricObject = async (obj) => {
       return cloned
     } catch (e) {
       return null
+    }
+  }
+}
+
+/**
+ * Active les contrôles de redimensionnement pour un objet
+ * @param {fabric.Object} obj - L'objet pour lequel activer les contrôles
+ */
+const activateControlsForObject = (obj) => {
+  if (obj && !obj.userData?.isWorkZoneIndicator) {
+    // Vérifier si l'objet est actuellement sélectionné
+    const isSelected = canvas && canvas.getActiveObject() === obj
+    console.log('Activation contrôles pour:', {
+      type: obj.type,
+      isWrapAroundCopy: obj.userData?.isWrapAroundCopy,
+      isSelected: isSelected,
+      selectable: obj.selectable,
+      evented: obj.evented
+    })
+    
+    // Activer les contrôles avec setControlsVisibility
+    // Activer tous les contrôles, y compris mt et mtr pour tous les objets
+    obj.setControlsVisibility({
+      mt: true,  // ✅ Contrôle du milieu haut (activé pour tous)
+      mb: true, // Bottom (milieu bas)
+      ml: true, // Left (milieu gauche)
+      mr: true, // Right (milieu droite)
+      tl: true, // Top-left (coin haut-gauche)
+      tr: true, // Top-right (coin haut-droite)
+      bl: true, // Bottom-left (coin bas-gauche)
+      br: true, // Bottom-right (coin bas-droite)
+      mtr: true  // ✅ Contrôle de rotation (activé pour tous)
+    })
+    
+    // S'assurer que chaque contrôle individuel est visible
+    if (obj.controls) {
+      const controlNames = ['mt', 'mb', 'ml', 'mr', 'tl', 'tr', 'bl', 'br', 'mtr']
+      controlNames.forEach(controlName => {
+        if (obj.controls[controlName]) {
+          // Activer tous les contrôles, y compris mt et mtr
+          obj.controls[controlName].visible = true
+        }
+      })
+    }
+    
+    // Mettre à jour les coordonnées pour que les contrôles soient correctement positionnés
+    if (obj.setCoords) {
+      obj.setCoords()
+    }
+    
+    // Si l'objet est sélectionné, forcer un rendu pour afficher les contrôles
+    if (isSelected && canvas) {
+      canvas.renderAll()
+    }
+    
+    // Afficher les contrôles après activation avec leur état visible
+    if (obj.controls) {
+      const controlsState = {}
+      Object.keys(obj.controls).forEach(key => {
+        controlsState[key] = {
+          visible: obj.controls[key]?.visible,
+          actionName: obj.controls[key]?.actionName
+        }
+      })
+      console.log('✅ Contrôles activés pour:', obj.type, controlsState, '| Sélectionné:', isSelected)
+    } else {
+      console.log('⚠️ Contrôles activés pour:', obj.type, 'mais obj.controls non disponible')
     }
   }
 }
@@ -536,6 +646,8 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'horizontal-right'
       }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -566,6 +678,8 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'horizontal-left'
       }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -596,6 +710,8 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'vertical-bottom'
       }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -625,6 +741,8 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'vertical-top'
       }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -646,12 +764,14 @@ const createWrapAroundCopies = async (obj) => {
       copy.set({
         left: objLeft - canvasWidth,
         top: objTop + (activeZoneBottom - activeZoneTop),
-        selectable: false,
-        evented: false,
+        selectable: true,  // Permettre la sélection pour activer les contrôles
+        evented: true,      // Permettre les événements
         excludeFromExport: true
       })
       copy.userData = { isWrapAroundCopy: true, originalObject: obj }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -671,12 +791,14 @@ const createWrapAroundCopies = async (obj) => {
       copy.set({
         left: objLeft - canvasWidth,
         top: objTop - (activeZoneBottom - activeZoneTop),
-        selectable: false,
-        evented: false,
+        selectable: true,  // Permettre la sélection pour activer les contrôles
+        evented: true,      // Permettre les événements
         excludeFromExport: true
       })
       copy.userData = { isWrapAroundCopy: true, originalObject: obj }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -696,12 +818,14 @@ const createWrapAroundCopies = async (obj) => {
       copy.set({
         left: objLeft + canvasWidth,
         top: objTop + (activeZoneBottom - activeZoneTop),
-        selectable: false,
-        evented: false,
+        selectable: true,  // Permettre la sélection pour activer les contrôles
+        evented: true,      // Permettre les événements
         excludeFromExport: true
       })
       copy.userData = { isWrapAroundCopy: true, originalObject: obj }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -721,12 +845,14 @@ const createWrapAroundCopies = async (obj) => {
       copy.set({
         left: objLeft + canvasWidth,
         top: objTop - (activeZoneBottom - activeZoneTop),
-        selectable: false,
-        evented: false,
+        selectable: true,  // Permettre la sélection pour activer les contrôles
+        evented: true,      // Permettre les événements
         excludeFromExport: true
       })
       copy.userData = { isWrapAroundCopy: true, originalObject: obj }
       canvas.add(copy)
+      // Activer les contrôles de redimensionnement pour la copie
+      activateControlsForObject(copy)
       // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
         if (canvas.sendObjectToBack) {
@@ -742,6 +868,27 @@ const createWrapAroundCopies = async (obj) => {
   // Stocker les copies
   if (copies.length > 0) {
     wrapAroundCopies.set(obj, copies)
+    
+    // Ajouter l'original et toutes ses copies à la liste des objets multi-sélectionnés
+    // Cela permet d'afficher les contrôles de l'original et de toutes les copies simultanément
+    if (!canvas.userData) {
+      canvas.userData = {}
+    }
+    if (!canvas.userData.multiSelectedObjects) {
+      canvas.userData.multiSelectedObjects = []
+    }
+    
+    // Vérifier si l'original est déjà dans la liste, sinon l'ajouter
+    if (!canvas.userData.multiSelectedObjects.includes(obj)) {
+      canvas.userData.multiSelectedObjects.push(obj)
+    }
+    
+    // Ajouter toutes les copies à la liste
+    copies.forEach(copy => {
+      if (copy && canvas.getObjects().includes(copy) && !canvas.userData.multiSelectedObjects.includes(copy)) {
+        canvas.userData.multiSelectedObjects.push(copy)
+      }
+    })
   }
 }
 
@@ -787,7 +934,7 @@ const syncAllCopiesWithOriginal = (original) => {
       newTop = objTop + zoneHeight
     }
     
-    // Mettre à jour la copie (sans déclencher les événements)
+    // Mettre à jour la copie avec TOUTES les propriétés de l'original (synchronisation complète)
     copy.set({
       left: newLeft,
       top: newTop,
@@ -795,7 +942,33 @@ const syncAllCopiesWithOriginal = (original) => {
       scaleY: original.scaleY,
       angle: original.angle,
       flipX: original.flipX,
-      flipY: original.flipY
+      flipY: original.flipY,
+      // Synchroniser les propriétés visuelles
+      fill: original.fill,
+      stroke: original.stroke,
+      strokeWidth: original.strokeWidth,
+      opacity: original.opacity,
+      shadow: original.shadow,
+      // Synchroniser les propriétés de transformation
+      skewX: original.skewX,
+      skewY: original.skewY,
+      // Synchroniser les propriétés spécifiques selon le type
+      ...(original.type === 'rect' && {
+        rx: original.rx,
+        ry: original.ry
+      }),
+      ...(original.type === 'circle' && {
+        radius: original.radius
+      }),
+      ...(original.type === 'textbox' && {
+        text: original.text,
+        fontSize: original.fontSize,
+        fontFamily: original.fontFamily,
+        fontWeight: original.fontWeight,
+        fontStyle: original.fontStyle,
+        textAlign: original.textAlign,
+        lineHeight: original.lineHeight
+      })
     })
     copy.setCoords()
   })
@@ -882,6 +1055,38 @@ const initCanvas = () => {
     canvas.selection = true
     canvas.allowTouchScrolling = false
     
+    // Fonction pour personnaliser les contrôles (position et couleur)
+    const customizeControls = (obj) => {
+      if (!obj.controls) return
+      
+      Object.keys(obj.controls).forEach(controlName => {
+        const control = obj.controls[controlName]
+        if (control) {
+          // Personnaliser la couleur des contrôles : carrés vides avec bordure bleue
+          control.fill = 'transparent' // Pas de remplissage (carré vide)
+          control.stroke = '#3b82f6' // Bordure bleue
+          control.strokeWidth = 1 // Bordure fine
+          
+          // Personnaliser la taille des contrôles
+          control.sizeX = 12
+          control.sizeY = 12
+          
+          // Personnaliser la position des contrôles (offset depuis la position par défaut)
+          // Les valeurs x et y sont des offsets relatifs (entre -0.5 et 0.5)
+          // Par exemple, pour déplacer un contrôle vers l'extérieur :
+          if (controlName === 'mt') {
+            control.y = -2 // Déplacer légèrement plus haut
+          } else if (controlName === 'mb') {
+            control.y = 4 // Déplacer légèrement plus bas
+          } else if (controlName === 'ml') {
+            control.x = -0.6 // Déplacer légèrement plus à gauche
+          } else if (controlName === 'mr') {
+            control.x = 0.1 // Déplacer légèrement plus à droite
+          }
+        }
+      })
+    }
+    
     // Fonction helper pour activer les contrôles de redimensionnement
     const enableScalingControls = (obj) => {
       if (obj && !obj.userData?.isWorkZoneIndicator) {
@@ -904,7 +1109,28 @@ const initCanvas = () => {
     // Cela permet d'avoir des handles de redimensionnement visibles et fonctionnels
     canvas.on('object:added', (e) => {
       const obj = e.target
-      enableScalingControls(obj)
+      
+      // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
+      if (obj.userData?.controlsConfig) {
+        obj.setControlsVisibility(obj.userData.controlsConfig)
+        if (obj.controls) {
+          Object.keys(obj.controls).forEach(key => {
+            if (obj.controls[key] && obj.userData.controlsConfig[key] !== undefined) {
+              obj.controls[key].visible = obj.userData.controlsConfig[key]
+            }
+          })
+        }
+        
+        // Personnaliser les contrôles (position et couleur) si demandé
+        if (obj.userData?.customizeControls) {
+          customizeControls(obj)
+        }
+        
+        obj.setCoords()
+      } else {
+        // Sinon, activer tous les contrôles par défaut
+        enableScalingControls(obj)
+      }
       
       // S'assurer que l'objet est sélectionnable et transformable
       if (obj && !obj.userData?.isWorkZoneIndicator) {
@@ -954,8 +1180,57 @@ const initCanvas = () => {
     canvas.on('selection:created', (e) => {
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
-        // Activer les contrôles de redimensionnement pour l'objet sélectionné
-        enableScalingControls(activeObject)
+        // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
+        if (activeObject.userData?.controlsConfig) {
+          activeObject.setControlsVisibility(activeObject.userData.controlsConfig)
+          if (activeObject.controls) {
+            Object.keys(activeObject.controls).forEach(key => {
+              if (activeObject.controls[key] && activeObject.userData.controlsConfig[key] !== undefined) {
+                activeObject.controls[key].visible = activeObject.userData.controlsConfig[key]
+              }
+            })
+          }
+          
+          // Personnaliser les contrôles (position et couleur) si demandé
+          if (activeObject.userData?.customizeControls) {
+            customizeControls(activeObject)
+          }
+          
+          activeObject.setCoords()
+        } else {
+          // Sinon, activer tous les contrôles par défaut
+          enableScalingControls(activeObject)
+        }
+        
+        // Ajouter l'original et ses copies wrap-around à la liste des objets multi-sélectionnés
+        if (!canvas.userData) {
+          canvas.userData = {}
+        }
+        if (!canvas.userData.multiSelectedObjects) {
+          canvas.userData.multiSelectedObjects = []
+        }
+        
+        // Déterminer l'objet original (soit l'objet sélectionné, soit son original si c'est une copie)
+        const original = activeObject.userData?.isWrapAroundCopy 
+          ? activeObject.userData.originalObject 
+          : activeObject
+        
+        if (original) {
+          // Vider la liste précédente et ajouter l'original
+          canvas.userData.multiSelectedObjects = [original]
+          
+          // Ajouter toutes les copies wrap-around de l'original
+          const copies = wrapAroundCopies.get(original)
+          if (copies && copies.length > 0) {
+            copies.forEach(copy => {
+              if (copy && canvas.getObjects().includes(copy)) {
+                // Activer les contrôles pour chaque copie
+                activateControlsForObject(copy)
+                canvas.userData.multiSelectedObjects.push(copy)
+              }
+            })
+          }
+        }
         
         emit('object-selected', { 
           object: activeObject,
@@ -967,8 +1242,57 @@ const initCanvas = () => {
     canvas.on('selection:updated', (e) => {
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
-        // Activer les contrôles de redimensionnement pour l'objet sélectionné
-        enableScalingControls(activeObject)
+        // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
+        if (activeObject.userData?.controlsConfig) {
+          activeObject.setControlsVisibility(activeObject.userData.controlsConfig)
+          if (activeObject.controls) {
+            Object.keys(activeObject.controls).forEach(key => {
+              if (activeObject.controls[key] && activeObject.userData.controlsConfig[key] !== undefined) {
+                activeObject.controls[key].visible = activeObject.userData.controlsConfig[key]
+              }
+            })
+          }
+          
+          // Personnaliser les contrôles (position et couleur) si demandé
+          if (activeObject.userData?.customizeControls) {
+            customizeControls(activeObject)
+          }
+          
+          activeObject.setCoords()
+        } else {
+          // Sinon, activer tous les contrôles par défaut
+          enableScalingControls(activeObject)
+        }
+        
+        // Ajouter l'original et ses copies wrap-around à la liste des objets multi-sélectionnés
+        if (!canvas.userData) {
+          canvas.userData = {}
+        }
+        if (!canvas.userData.multiSelectedObjects) {
+          canvas.userData.multiSelectedObjects = []
+        }
+        
+        // Déterminer l'objet original (soit l'objet sélectionné, soit son original si c'est une copie)
+        const original = activeObject.userData?.isWrapAroundCopy 
+          ? activeObject.userData.originalObject 
+          : activeObject
+        
+        if (original) {
+          // Vider la liste précédente et ajouter l'original
+          canvas.userData.multiSelectedObjects = [original]
+          
+          // Ajouter toutes les copies wrap-around de l'original
+          const copies = wrapAroundCopies.get(original)
+          if (copies && copies.length > 0) {
+            copies.forEach(copy => {
+              if (copy && canvas.getObjects().includes(copy)) {
+                // Activer les contrôles pour chaque copie
+                activateControlsForObject(copy)
+                canvas.userData.multiSelectedObjects.push(copy)
+              }
+            })
+          }
+        }
         
         emit('object-selected', { 
           object: activeObject,
@@ -978,6 +1302,10 @@ const initCanvas = () => {
     })
     
     canvas.on('selection:cleared', () => {
+      // Vider la liste des objets multi-sélectionnés
+      if (canvas.userData?.multiSelectedObjects) {
+        canvas.userData.multiSelectedObjects = []
+      }
       emit('object-deselected')
     })
     
@@ -992,8 +1320,17 @@ const initCanvas = () => {
       // Notifier le parent pour mettre à jour la liste des objets
       emit('objects-changed')
     })
-    canvas.on('object:modified', () => {
+    canvas.on('object:modified', (e) => {
       // Ne pas sauvegarder pendant la modification, seulement après
+      const obj = e.target
+      
+      // Synchroniser les copies wrap-around si l'objet modifié est un original
+      if (obj && !obj.userData?.isWorkZoneIndicator && !obj.userData?.isWrapAroundCopy) {
+        syncAllCopiesWithOriginal(obj)
+        // Vérifier si de nouvelles copies doivent être créées
+        applyWrapAround(obj)
+      }
+      
       signalChange()
       
       // Mettre à jour les coordonnées de l'objet sélectionné si nécessaire
@@ -1119,11 +1456,47 @@ const initCanvas = () => {
       emit('design-updated', canvas)
     })
     // Événement après le redimensionnement (scaling terminé)
-    canvas.on('object:scaled', () => {
+    canvas.on('object:scaled', (e) => {
+      const obj = e.target
+      
+      // Synchroniser les copies wrap-around si l'objet redimensionné est un original
+      if (obj && !obj.userData?.isWorkZoneIndicator && !obj.userData?.isWrapAroundCopy) {
+        syncAllCopiesWithOriginal(obj)
+        // Vérifier si de nouvelles copies doivent être créées après le redimensionnement
+        applyWrapAround(obj)
+      } else if (obj && obj.userData?.isWrapAroundCopy) {
+        // Si c'est une copie qui est redimensionnée, synchroniser avec l'original
+        const original = obj.userData?.originalObject
+        if (original) {
+          original.set({ 
+            scaleX: obj.scaleX,
+            scaleY: obj.scaleY
+          })
+          original.setCoords()
+          syncAllCopiesWithOriginal(original)
+          applyWrapAround(original)
+        }
+      }
+      
       saveHistory()
       signalChange()
     })
-    canvas.on('object:rotated', () => {
+    canvas.on('object:rotated', (e) => {
+      const obj = e.target
+      
+      // Synchroniser les copies wrap-around si l'objet roté est un original
+      if (obj && !obj.userData?.isWorkZoneIndicator && !obj.userData?.isWrapAroundCopy) {
+        syncAllCopiesWithOriginal(obj)
+      } else if (obj && obj.userData?.isWrapAroundCopy) {
+        // Si c'est une copie qui est rotée, synchroniser avec l'original
+        const original = obj.userData?.originalObject
+        if (original) {
+          original.set({ angle: obj.angle })
+          original.setCoords()
+          syncAllCopiesWithOriginal(original)
+        }
+      }
+      
       saveHistory()
       signalChange()
     })
@@ -1138,6 +1511,129 @@ const initCanvas = () => {
     canvas.on('selection:updated', () => {
       canvas.renderAll()
     })
+    canvas.on('after:render', (e) => {
+      // Afficher les contrôles des objets multi-sélectionnés
+      if (canvas.userData?.multiSelectedObjects) {
+        const ctx = e.ctx || canvas.getContext()
+        const activeObject = canvas.getActiveObject()
+        
+        canvas.userData.multiSelectedObjects.forEach(obj => {
+          if (obj && canvas.getObjects().includes(obj) && obj !== activeObject) {
+            // Afficher les contrôles de l'objet même s'il n'est pas sélectionné
+            obj.setCoords()
+            if (obj.controls) {
+              // Utiliser les coordonnées transformées de l'objet
+              const coords = obj.aCoords || obj.oCoords
+              if (coords) {
+                // Stocker les positions de tous les contrôles pour tracer les lignes
+                const controlPositions = {}
+                
+                Object.keys(obj.controls).forEach(controlName => {
+                  const control = obj.controls[controlName]
+                  if (control && control.visible !== false) {
+                    let finalX, finalY
+                    
+                    // Calculer la position du contrôle en fonction de son type
+                    switch (controlName) {
+                      case 'tl': // Top-left
+                        finalX = coords.tl.x
+                        finalY = coords.tl.y
+                        break
+                      case 'tr': // Top-right
+                        finalX = coords.tr.x
+                        finalY = coords.tr.y
+                        break
+                      case 'bl': // Bottom-left
+                        finalX = coords.bl.x
+                        finalY = coords.bl.y
+                        break
+                      case 'br': // Bottom-right
+                        finalX = coords.br.x
+                        finalY = coords.br.y
+                        break
+                      case 'mt': // Middle-top
+                        finalX = (coords.tl.x + coords.tr.x) / 2
+                        finalY = (coords.tl.y + coords.tr.y) / 2
+                        break
+                      case 'mb': // Middle-bottom
+                        finalX = (coords.bl.x + coords.br.x) / 2
+                        finalY = (coords.bl.y + coords.br.y) / 2
+                        break
+                      case 'ml': // Middle-left
+                        finalX = (coords.tl.x + coords.bl.x) / 2
+                        finalY = (coords.tl.y + coords.bl.y) / 2
+                        break
+                      case 'mr': // Middle-right
+                        finalX = (coords.tr.x + coords.br.x) / 2
+                        finalY = (coords.tr.y + coords.br.y) / 2
+                        break
+                      case 'mtr': // Middle-top-rotation
+                        // Position au-dessus du centre du haut
+                        const centerTopX = (coords.tl.x + coords.tr.x) / 2
+                        const centerTopY = (coords.tl.y + coords.tr.y) / 2
+                        // Calculer un vecteur perpendiculaire vers le haut
+                        const dx = coords.tr.x - coords.tl.x
+                        const dy = coords.tr.y - coords.tl.y
+                        const length = Math.sqrt(dx * dx + dy * dy)
+                        const offset = 30 // Distance au-dessus du bord
+                        finalX = centerTopX - (dy / length) * offset
+                        finalY = centerTopY + (dx / length) * offset
+                        break
+                      default:
+                        // Position par défaut basée sur control.x et control.y
+                        finalX = coords.tl.x + (coords.tr.x - coords.tl.x) * (control.x + 0.5)
+                        finalY = coords.tl.y + (coords.bl.y - coords.tl.y) * (control.y + 0.5)
+                    }
+                    
+                    // Stocker la position pour tracer les lignes
+                    controlPositions[controlName] = { x: finalX, y: finalY }
+                    
+                    // Dessiner le contrôle comme un carré vide avec bordure bleue
+                    ctx.save()
+                    ctx.fillStyle = control.fill || 'transparent'
+                    ctx.strokeStyle = control.stroke || '#3b82f6'
+                    ctx.lineWidth = control.strokeWidth || 1
+                    const size = (control.sizeX || 12) / 2
+                    // Dessiner un carré au lieu d'un cercle
+                    ctx.beginPath()
+                    ctx.rect(finalX - size, finalY - size, size * 2, size * 2)
+                    ctx.fill()
+                    ctx.stroke()
+                    ctx.restore()
+                  }
+                })
+                
+                // Tracer des lignes entre les contrôles des coins pour former un rectangle
+                ctx.save()
+                ctx.strokeStyle = '#3b82f6'
+                ctx.lineWidth = 0.5 // Ligne fine
+                ctx.setLineDash([5, 5]) // Ligne en pointillés
+                ctx.beginPath()
+                
+                // Ligne entre les coins (tl -> tr -> br -> bl -> tl)
+                if (controlPositions.tl && controlPositions.tr) {
+                  ctx.moveTo(controlPositions.tl.x, controlPositions.tl.y)
+                  ctx.lineTo(controlPositions.tr.x, controlPositions.tr.y)
+                }
+                if (controlPositions.tr && controlPositions.br) {
+                  ctx.lineTo(controlPositions.br.x, controlPositions.br.y)
+                }
+                if (controlPositions.br && controlPositions.bl) {
+                  ctx.lineTo(controlPositions.bl.x, controlPositions.bl.y)
+                }
+                if (controlPositions.bl && controlPositions.tl) {
+                  ctx.lineTo(controlPositions.tl.x, controlPositions.tl.y)
+                }
+                
+                ctx.stroke()
+                ctx.restore()
+              }
+            }
+          }
+        })
+      }
+    })
+    
     canvas.on('after:render', () => {
       // Debounced updates from render
       if (renderTimeout) {
@@ -1390,143 +1886,10 @@ const toggleDrawMode = () => {
   }
 }
 
-const addText = () => {
-  if (!canvas) {
-    alert('Canvas non initialisé. Veuillez attendre le chargement.')
-    return
-  }
-  
-  
-  const text = new Textbox('Nouveau texte', {
-    left: canvasWidth / 2 - 100,
-    top: canvasHeight / 2 - 25,
-    fontSize: 32,
-    fill: drawColor.value || '#000000',
-    fontFamily: 'Arial',
-    width: 200,
-    selectable: true,
-    evented: true
-  })
-  
-  
-  canvas.add(text)
-  canvas.setActiveObject(text)
-  canvas.isDrawingMode = false
-  isDrawMode.value = false
-  canvas.selection = true
-  
-  // Forcer le rendu
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  
-  setTimeout(() => {
-    canvas.renderAll()
-  }, 50)
-}
 
-const addImage = () => {
-  if (!canvas) return
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'image/*'
-  input.onchange = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
 
-    try {
-      const url = URL.createObjectURL(file)
-      const fabricImg = await FabricImage.fromURL(url)
-      
-      // Center the image
-      fabricImg.set({
-        left: canvasWidth / 2 - fabricImg.width / 2,
-        top: canvasHeight / 2 - fabricImg.height / 2
-      })
-      
-      // S'assurer que l'image est sélectionnable et déplaçable
-      fabricImg.selectable = true
-      fabricImg.evented = true
-      
-      canvas.add(fabricImg)
-      canvas.setActiveObject(fabricImg)
-      canvas.isDrawingMode = false
-      isDrawMode.value = false
-      canvas.selection = true // Réactiver la sélection
-      canvas.renderAll()
-      requestTextureUpdate() // Signal pour mettre à jour la texture 3D
-      emit('design-updated', canvas)
-      
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      alert('Erreur lors du chargement de l\'image')
-    }
-  }
-  input.click()
-}
 
-const addCircle = () => {
-  if (!canvas) {
-    alert('Canvas non initialisé. Veuillez attendre le chargement.')
-    return
-  }
-  
-  
-  const circle = new Circle({
-    left: canvasWidth / 2 - 50,
-    top: canvasHeight / 2 - 50,
-    radius: 50,
-    fill: drawColor.value || '#000000',
-    stroke: '#000000',
-    strokeWidth: 2,
-    selectable: true,
-    evented: true
-  })
-  
-  
-  canvas.add(circle)
-  canvas.setActiveObject(circle)
-  canvas.isDrawingMode = false
-  isDrawMode.value = false
-  canvas.selection = true
-  
-  // Forcer le rendu plusieurs fois pour s'assurer que c'est visible
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  
-  // Double vérification
-  setTimeout(() => {
-    canvas.renderAll()
-  }, 50)
-}
 
-const addRectangle = () => {
-  if (!canvas) return
-  const rect = new Rect({
-    left: canvasWidth / 2 - 75,
-    top: canvasHeight / 2 - 50,
-    width: 150,
-    height: 100,
-    fill: drawColor.value,
-    stroke: '#000000',
-    strokeWidth: 2,
-    rx: 8,
-    ry: 8
-  })
-  // S'assurer que le rectangle est sélectionnable et déplaçable
-  rect.selectable = true
-  rect.evented = true
-  
-  canvas.add(rect)
-  canvas.setActiveObject(rect)
-  canvas.isDrawingMode = false
-  isDrawMode.value = false
-  canvas.selection = true // Réactiver la sélection
-  canvas.renderAll()
-  requestTextureUpdate() // Signal pour mettre à jour la texture 3D
-  emit('design-updated', canvas)
-}
 
 /**
  * Ajoute une ligne rouge verticale pour visualiser la couture du gobelet
@@ -1847,12 +2210,26 @@ const placeCircleAt = (x, y) => {
   emit('design-updated', canvas)
 }
 
+/**
+ * Crée deux rectangles côte à côte à la position (x, y) et configure leurs contrôles
+ * 
+ * @param {number} x - Position X où placer les rectangles (point central entre les deux)
+ * @param {number} y - Position Y où placer les rectangles (centre vertical)
+ */
 const placeRectangleAt = (x, y) => {
-  const rect = new Rect({
-    left: x - 75,
-    top: y - 50,
-    width: 150,
-    height: 100,
+  // ===== ÉTAPE 1: Définir les dimensions =====
+  const rectWidth = 100      // Largeur de chaque rectangle
+  const rectHeight = 70      // Hauteur de chaque rectangle
+  const spacing = 10         // Espacement entre les deux rectangles
+  
+  // ===== ÉTAPE 2: Créer le premier rectangle (à gauche du point cliqué) =====
+  // Position: x - rectWidth - spacing/2 (pour que le rectangle soit à gauche)
+  // Exemple: si x=500, le rectangle sera à 500-100-5 = 395 (son bord droit sera à 495)
+  const rect1 = new Rect({
+    left: x - rectWidth - spacing / 2,  // Position X: à gauche du point cliqué
+    top: y - rectHeight / 2,             // Position Y: centré verticalement
+    width: rectWidth,
+    height: rectHeight,
     fill: drawColor.value || '#000000',
     stroke: '#000000',
     strokeWidth: 2,
@@ -1862,14 +2239,128 @@ const placeRectangleAt = (x, y) => {
     evented: true
   })
   
-  canvas.add(rect)
-  canvas.setActiveObject(rect)
-  canvas.isDrawingMode = false
-  isDrawMode.value = false
-  canvas.selection = true
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
+  // ===== ÉTAPE 3: Créer le deuxième rectangle (à droite du point cliqué) =====
+  // Position: x + spacing/2 (pour que le rectangle soit à droite)
+  // Exemple: si x=500, le rectangle sera à 500+5 = 505 (son bord gauche sera à 505)
+  const rect2 = new Rect({
+    left: x + spacing / 2,   // Position X: à droite du point cliqué
+    top: y - rectHeight / 2, // Position Y: centré verticalement (même que rect1)
+    width: rectWidth,
+    height: rectHeight,
+    fill: drawColor.value || '#000000',
+    stroke: '#000000',
+    strokeWidth: 2,
+    rx: 8,
+    ry: 8,
+    selectable: true,
+    evented: true
+  })
+  
+  // ===== ÉTAPE 4: Configurer les contrôles du premier rectangle =====
+  // Les contrôles sont les petits carrés/cercles qui permettent de redimensionner/rotater
+  // mt = middle-top, mb = middle-bottom, ml = middle-left, mr = middle-right
+  // tl = top-left, tr = top-right, bl = bottom-left, br = bottom-right
+  // mtr = middle-top-rotation (contrôle de rotation)
+  // rect1.userData = rect1.userData || {}
+  // rect1.userData.controlsConfig = {
+  //   mt: true,   // ✅ Contrôle en haut au milieu
+  //   mb: true,   // ✅ Contrôle en bas au milieu
+  //   ml: true,   // ✅ Contrôle à gauche au milieu
+  //   mr: true,   // ✅ Contrôle à droite au milieu
+  //   tl: true,   // ✅ Contrôle coin haut-gauche
+  //   tr: true,   // ✅ Contrôle coin haut-droite
+  //   bl: true,   // ✅ Contrôle coin bas-gauche
+  //   br: true,   // ✅ Contrôle coin bas-droite
+  //   mtr: true  // ✅ Contrôle de rotation (en haut)
+  // }
+  // rect1.userData.customizeControls = true // Flag pour appliquer la personnalisation (couleur rouge)
+  
+  // ===== ÉTAPE 5: Configurer les contrôles du deuxième rectangle =====
+  rect2.userData = rect2.userData || {}
+  rect2.userData.controlsConfig = {
+    mt: true,   // ✅ Contrôle en haut au milieu
+    mb: false,  // ❌ Pas de contrôle en bas au milieu
+    ml: true,   // ✅ Contrôle à gauche au milieu (pour redimensionner vers la gauche)
+    mr: true,   // ✅ Contrôle à droite au milieu (pour redimensionner vers la droite)
+    tl: true,   // ✅ Contrôle coin haut-gauche
+    tr: true,   // ✅ Contrôle coin haut-droite
+    bl: true,   // ✅ Contrôle coin bas-gauche
+    br: true,   // ✅ Contrôle coin bas-droite
+    mtr: true  // ✅ Contrôle de rotation (en haut)
+  }
+  // rect2.userData.customizeControls = true // Flag pour appliquer la personnalisation (couleur rouge)
+  
+  // ===== ÉTAPE 6: Ajouter les rectangles au canvas =====
+  // Quand on ajoute un objet, l'événement 'object:added' se déclenche
+  // Cet événement vérifie si userData.controlsConfig existe et l'applique automatiquement
+  canvas.add(rect1)
+  canvas.add(rect2)
+  
+  // ===== ÉTAPE 7: Enregistrer les objets pour l'affichage multi-sélection =====
+  // On stocke les deux rectangles dans canvas.userData.multiSelectedObjects
+  // Cela permet à l'événement 'after:render' d'afficher les contrôles des DEUX rectangles
+  // même si un seul est sélectionné (solution pour afficher les contrôles individuels)
+  if (!canvas.userData) {
+    canvas.userData = {}
+  }
+  if (!canvas.userData.multiSelectedObjects) {
+    canvas.userData.multiSelectedObjects = []
+  }
+  canvas.userData.multiSelectedObjects.push(rect1, rect2)
+  
+  // ===== ÉTAPE 8: Activer les contrôles après que l'objet soit ajouté =====
+  // nextTick() attend que Vue.js ait fini de traiter tous les changements
+  // C'est nécessaire car l'événement 'object:added' doit d'abord s'exécuter
+  // nextTick(() => {
+  //   // Pour rect1: appliquer la configuration des contrôles
+  //   if (rect1.userData?.controlsConfig) {
+  //     // Activer/désactiver les contrôles selon la configuration
+  //     rect1.setControlsVisibility(rect1.userData.controlsConfig)
+  //     // S'assurer que chaque contrôle individuel a le bon état visible
+  //     if (rect1.controls) {
+  //       Object.keys(rect1.controls).forEach(key => {
+  //         if (rect1.controls[key] && rect1.userData.controlsConfig[key] !== undefined) {
+  //           rect1.controls[key].visible = rect1.userData.controlsConfig[key]
+  //         }
+  //       })
+  //     }
+  //     // Appliquer la personnalisation (couleur rouge, position, etc.)
+  //     if (rect1.userData?.customizeControls) {
+  //       customizeControls(rect1)
+  //     }
+  //     // Mettre à jour les coordonnées pour positionner correctement les contrôles
+  //     rect1.setCoords()
+  //   }
+    
+  //   // Pour rect2: même processus
+  //   if (rect2.userData?.controlsConfig) {
+  //     rect2.setControlsVisibility(rect2.userData.controlsConfig)
+  //     if (rect2.controls) {
+  //       Object.keys(rect2.controls).forEach(key => {
+  //         if (rect2.controls[key] && rect2.userData.controlsConfig[key] !== undefined) {
+  //           rect2.controls[key].visible = rect2.userData.controlsConfig[key]
+  //         }
+  //       })
+  //     }
+  //     if (rect2.userData?.customizeControls) {
+  //       customizeControls(rect2)
+  //     }
+  //     rect2.setCoords()
+  //   }
+    
+  //   // Sélectionner le premier rectangle (pour afficher ses contrôles par défaut)
+  //   canvas.setActiveObject(rect1)
+  //   // Forcer le rendu pour afficher les contrôles
+  //   canvas.renderAll()
+  // })
+  
+  // ===== ÉTAPE 9: Configuration finale du canvas =====
+  canvas.isDrawingMode = false  // Désactiver le mode dessin
+  isDrawMode.value = false      // Désactiver le mode dessin (variable Vue)
+  canvas.selection = true       // Activer la sélection d'objets
+  canvas.renderAll()            // Rendre le canvas
+  requestTextureUpdate()        // Demander la mise à jour de la texture 3D
+  emit('design-updated', canvas) // Notifier le composant parent que le design a changé
 }
 
 const placeTextAt = (x, y) => {
@@ -2123,13 +2614,13 @@ const selectObjectAtPosition = (x, y) => {
   const obj = findObjectAtPosition(x, y)
   
   if (obj) {
-    
-    // Si c'est une copie wrap-around, sélectionner l'original à la place
-    const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
-      ? obj.userData.originalObject 
-      : obj
+    // Permettre la sélection directe des copies pour voir leurs contrôles
+    // Sélectionner l'objet cliqué directement (copie ou original)
+    const targetObject = obj
     
     canvas.setActiveObject(targetObject)
+    // Activer les contrôles pour l'objet sélectionné
+    activateControlsForObject(targetObject)
     canvas.renderAll()
     
     // Émettre l'événement de sélection
@@ -2181,11 +2672,12 @@ const selectObjectAtPosition = (x, y) => {
                    y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
     
     if (isNear) {
-      const targetObject = obj.userData?.isWrapAroundCopy && obj.userData?.originalObject 
-        ? obj.userData.originalObject 
-        : obj
+      // Permettre la sélection directe des copies
+      const targetObject = obj
       
       canvas.setActiveObject(targetObject)
+      // Activer les contrôles pour l'objet sélectionné
+      activateControlsForObject(targetObject)
       canvas.renderAll()
       
       emit('object-selected', {
@@ -2290,12 +2782,12 @@ const selectObjectAtPosition = (x, y) => {
   
   // Si on a trouvé un objet proche, le sélectionner
   if (closestObj) {
-    
-    const targetObject = closestObj.userData?.isWrapAroundCopy && closestObj.userData?.originalObject 
-      ? closestObj.userData.originalObject 
-      : closestObj
+    // Permettre la sélection directe des copies
+    const targetObject = closestObj
     
     canvas.setActiveObject(targetObject)
+    // Activer les contrôles pour l'objet sélectionné
+    activateControlsForObject(targetObject)
     canvas.renderAll()
     
     emit('object-selected', {

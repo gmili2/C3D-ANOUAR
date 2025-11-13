@@ -40,9 +40,9 @@
           {{ currentView === '3d' ? '🎨 Vue 2D' : '🎯 Vue 3D' }}
         </button>
         <!-- Bouton pour ajouter une bande verte -->
-        <button @click="addGreenBand" class="upload-btn" :disabled="!hasModel">
+        <!-- <button @click="addGreenBand" class="upload-btn" :disabled="!hasModel">
           🟢 Ajouter bande verte
-        </button>
+        </button> -->
         <!-- Bouton pour afficher/masquer la couture en rouge -->
         <button @click="toggleSeamLine" class="upload-btn" :disabled="!hasModel">
           🔴 Afficher/Masquer couture
@@ -544,17 +544,17 @@ const onTextureReady = (texture) => {
  * 
  * @param {Object} clickData - Données du clic contenant canvasX, canvasY, etc.
  */
-const addGreenBand = () => {
-  if (!fabricDesignerRef.value || !fabricDesignerRef.value.addGreenBand) {
-    console.warn('FabricDesigner non disponible')
-    return
-  }
+// const addGreenBand = () => {
+//   if (!fabricDesignerRef.value || !fabricDesignerRef.value.addGreenBand) {
+//     console.warn('FabricDesigner non disponible')
+//     return
+//   }
   
-  fabricDesignerRef.value.addGreenBand()
-  nextTick(() => {
-    updateAllObjectsList()
-  })
-}
+//   fabricDesignerRef.value.addGreenBand()
+//   nextTick(() => {
+//     updateAllObjectsList()
+//   })
+// }
 
 /**
  * Affiche ou masque la ligne de couture en rouge

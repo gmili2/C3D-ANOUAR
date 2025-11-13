@@ -1966,48 +1966,7 @@ const addSeamLine = () => {
   
 }
 
-/**
- * Ajoute un point vert à la position spécifiée (utilisé pour marquer les clics sur la couture)
- * @param {number} x - Position X sur le canvas
- * @param {number} y - Position Y sur le canvas
- */
-const addSeamPoint = (x, y) => {
-  if (!canvas) {
-    return
-  }
-  
-  // Créer un petit cercle vert pour marquer la position de la couture
-  const pointSize = 8 // Rayon du point en pixels
-  const seamPoint = new Circle({
-    left: x - pointSize,
-    top: y - pointSize,
-    radius: pointSize,
-    fill: '#00ff00', // Vert pur
-    stroke: '#00cc00', // Bordure verte foncée
-    strokeWidth: 2,
-    selectable: false, // Non sélectionnable
-    evented: false, // Ne bloque pas les interactions
-    excludeFromExport: false // Inclure dans l'export
-  })
-  
-  // Marquer ce point comme point de couture
-  seamPoint.userData = { isSeamPoint: true }
-  
-  canvas.add(seamPoint)
-  // Envoyer le point à l'avant-plan pour qu'il soit visible
-  try {
-    if (canvas.bringObjectToFront) {
-      canvas.bringObjectToFront(seamPoint)
-    }
-  } catch (e) {
-    // Si la méthode n'existe pas, ignorer
-  }
-  
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  
-}
+// Fonction addSeamPoint supprimée - fonctionnalité de point vert sur la couture désactivée
 
 /**
  * Ajoute une bande verte horizontale au centre du gobelet
@@ -2213,6 +2172,7 @@ const placeCircleAt = (x, y) => {
     left: x - 50,
     top: y - 50,
     radius: 50,
+    opacity: 1.0,
     fill: drawColor.value || '#000000',
     stroke: '#000000',
     strokeWidth: 2,
@@ -3133,8 +3093,7 @@ defineExpose({
   deleteSelected,
   deselectObject,
   addGreenBand,
-  addSeamLine,
-  addSeamPoint
+  addSeamLine
 })
 </script>
 

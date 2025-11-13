@@ -83,6 +83,10 @@
           <div class="coord-label">Rotation:</div>
           <div class="coord-value">{{ selectedObjectCoords.angle.toFixed(1) }}°</div>
         </div>
+        <div class="coord-section">
+          <div class="coord-label">Opacité:</div>
+          <div class="coord-value">{{ (selectedObjectCoords.opacity !== undefined ? selectedObjectCoords.opacity : 1.0).toFixed(2) }}</div>
+        </div>
       </div>
     </div>
     
@@ -108,6 +112,9 @@
             <div class="object-detail-row">
               <span>W:</span> {{ obj.width.toFixed(1) }}, 
               <span>H:</span> {{ obj.height.toFixed(1) }}
+            </div>
+            <div class="object-detail-row">
+              <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
             </div>
           </div>
         </div>
@@ -167,6 +174,9 @@
             </div>
             <div class="mesh-detail-row">
               <span>H:</span> {{ obj.height.toFixed(1) }}
+            </div>
+            <div class="mesh-detail-row">
+              <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
             </div>
           </div>
         </div>
@@ -312,7 +322,8 @@ const selectedObjectCoords = ref({
   height: 0,
   scaleX: 1,
   scaleY: 1,
-  angle: 0
+  angle: 0,
+  opacity: 1.0
 })
 
 // ----- Liste de Tous les Objets -----
@@ -1131,7 +1142,8 @@ const loadModel = async (url) => {
 
     // Scale to fit in view - Réduire la taille pour mieux correspondre au canvas 2D
     // Facteur réduit de 3 à 1.3 pour diminuer la taille du gobelet de manière visible
-    const scale = 1.3 / maxDim
+    // Réduction supplémentaire de 20% (multiplier par 0.8)
+    const scale = (1.3 / maxDim) * 0.8
     obj.scale.multiplyScalar(scale)
 
     // Center the model
@@ -1156,7 +1168,8 @@ const loadModel = async (url) => {
             map: null, // Will be set when texture is applied
             envMap: environmentMap, // Texture d'environnement pour les réflexions
             transparent: true, // Rendre le gobelet transparent
-            opacity: 0.3, // Niveau de transparence (0 = complètement transparent, 1 = opaque)
+            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles (les zones transparentes restent transparentes grâce à alphaTest)
+            alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus, zones vraiment transparentes (alpha < 0.01) sont complètement invisibles
             metalness: 0.3, // Légèrement métallique pour voir les réflexions
             roughness: 0.7 // Surface légèrement rugueuse
           })
@@ -1165,7 +1178,8 @@ const loadModel = async (url) => {
           if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
               mat.transparent = true
-              mat.opacity = 0.3
+              mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+              mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
               if (mat instanceof THREE.MeshStandardMaterial) {
                 mat.envMap = environmentMap
                 mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
@@ -1174,7 +1188,8 @@ const loadModel = async (url) => {
             })
           } else {
             child.material.transparent = true
-            child.material.opacity = 0.3
+            child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+            child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
             if (child.material instanceof THREE.MeshStandardMaterial) {
               child.material.envMap = environmentMap
               child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
@@ -1654,7 +1669,8 @@ const applyTexture = (texture) => {
             mat.map = texture
             mat.envMap = environmentMap // Ajouter la texture d'environnement
             mat.transparent = true // Maintenir la transparence
-            mat.opacity = 0.3 // Maintenir le niveau de transparence
+            mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+            mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
             if (mat instanceof THREE.MeshStandardMaterial) {
               mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
               mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
@@ -1666,7 +1682,8 @@ const applyTexture = (texture) => {
               envMap: environmentMap, // Ajouter la texture d'environnement
               side: THREE.DoubleSide,
               transparent: true, // Rendre transparent
-              opacity: 0.3, // Niveau de transparence
+              opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
+              alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
               metalness: 0.3,
               roughness: 0.7
             })
@@ -1677,7 +1694,8 @@ const applyTexture = (texture) => {
           child.material.map = texture
           child.material.envMap = environmentMap // Ajouter la texture d'environnement
           child.material.transparent = true // Maintenir la transparence
-          child.material.opacity = 0.3 // Maintenir le niveau de transparence
+          child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+          child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
           if (child.material instanceof THREE.MeshStandardMaterial) {
             child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
             child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
@@ -1689,7 +1707,8 @@ const applyTexture = (texture) => {
             envMap: environmentMap, // Ajouter la texture d'environnement
             side: THREE.DoubleSide,
             transparent: true, // Rendre transparent
-            opacity: 0.3, // Niveau de transparence
+            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
+            alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
             metalness: 0.3,
             roughness: 0.7
           })
@@ -2053,7 +2072,8 @@ const updateSelectedObjectCoords = (obj) => {
     height: objHeight,
     scaleX: obj.scaleX || 1,
     scaleY: obj.scaleY || 1,
-    angle: obj.angle || 0
+    angle: obj.angle || 0,
+    opacity: obj.opacity !== undefined ? obj.opacity : 1.0
   }
 }
 
@@ -2105,6 +2125,7 @@ const updateObjectsListFromCanvas = (objects) => {
         top: obj.top || 0,
         width: objWidth,
         height: objHeight,
+        opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
         isSelected: isSelected
       }
     })
@@ -2133,6 +2154,22 @@ const rotateModel = (angleDegrees) => {
   }
 }
 
+/**
+ * Réduit la taille du modèle 3D actuellement chargé
+ * @param {number} scaleFactor - Facteur de réduction (ex: 0.8 pour réduire de 20%)
+ */
+const scaleModel = (scaleFactor = 0.8) => {
+  if (!currentMesh) return
+  
+  // Appliquer le scale au modèle
+  currentMesh.scale.multiplyScalar(scaleFactor)
+  
+  // Mettre à jour les contrôles de la caméra si nécessaire
+  if (controls) {
+    controls.update()
+  }
+}
+
 defineExpose({
   getCurrentMesh: () => currentMesh,
   applyTexture,
@@ -2155,6 +2192,7 @@ defineExpose({
   updateObjectsListFromCanvas,
   createSeamlessGoblet,
   rotateModel,
+  scaleModel,
   renderer,
   emit
 })

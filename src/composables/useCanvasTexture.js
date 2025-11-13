@@ -105,7 +105,8 @@ export const setupCanvasTexture = (canvas, materials) => {
           material instanceof THREE.MeshBasicMaterial) {
         material.map = texture
         material.transparent = true // Maintenir la transparence
-        material.opacity = 0.3 // Maintenir le niveau de transparence
+        material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+        material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
         material.needsUpdate = true
       }
     }
@@ -166,7 +167,8 @@ export const applyTextureToMesh = (mesh, texture) => {
             // Matériau compatible : mettre à jour la texture
             mat.map = texture
             mat.transparent = true // Maintenir la transparence
-            mat.opacity = 0.3 // Maintenir le niveau de transparence
+            mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+            mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
             mat.needsUpdate = true
           } else {
             // Matériau incompatible : créer un nouveau matériau
@@ -174,7 +176,8 @@ export const applyTextureToMesh = (mesh, texture) => {
               map: texture,
               side: THREE.DoubleSide,  // Rendu des deux côtés (important pour les t-shirts)
               transparent: true, // Rendre transparent
-              opacity: 0.3 // Niveau de transparence
+              opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
+              alphaTest: 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
             })
           }
         })
@@ -187,7 +190,8 @@ export const applyTextureToMesh = (mesh, texture) => {
           // Matériau compatible : mettre à jour la texture
           child.material.map = texture
           child.material.transparent = true // Maintenir la transparence
-          child.material.opacity = 0.3 // Maintenir le niveau de transparence
+          child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
+          child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
           child.material.needsUpdate = true
         } else {
           // Matériau incompatible : créer un nouveau matériau
@@ -195,7 +199,8 @@ export const applyTextureToMesh = (mesh, texture) => {
             map: texture,
             side: THREE.DoubleSide,
             transparent: true, // Rendre transparent
-            opacity: 0.3 // Niveau de transparence
+            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
+            alphaTest: 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
           })
         }
       }

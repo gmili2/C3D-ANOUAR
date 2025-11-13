@@ -51,6 +51,10 @@
         <button @click="createSeamlessGoblet" class="upload-btn" :disabled="!hasModel">
           ✨ Créer gobelet sans couture
         </button>
+        <!-- Bouton pour réduire la taille du modèle de 20% -->
+        <button @click="scaleDownModel" class="upload-btn" :disabled="!hasModel">
+          🔽 Réduire modèle 20%
+        </button>
       </div>
     </div>
 
@@ -298,9 +302,11 @@ const workZoneBottom = ref(10)  // Pourcentage à exclure du bas (calculé autom
 
 // Calculer la hauteur du canvas basée sur la zone personnalisable
 // Le canvas doit avoir une hauteur proportionnelle à la zone personnalisable
+// Réduire la hauteur pour que les éléments apparaissent à la bonne taille en 3D
 const canvasHeight = computed(() => {
   // Hauteur de base du canvas (800x600)
-  const baseHeight = 600
+  // Réduire la hauteur de base pour que les éléments ne soient pas trop grands en 3D
+  const baseHeight = 400  // Réduit de 600 à 400 pour mieux correspondre à la vue 3D
   const baseWidth = 800
   
   // Calculer le ratio de la zone personnalisable par rapport à la hauteur totale
@@ -581,6 +587,18 @@ const createSeamlessGoblet = () => {
   }
 }
 
+/**
+ * Réduit la taille du modèle 3D actuellement chargé de 20%
+ */
+const scaleDownModel = () => {
+  if (!threeSceneRef.value || !threeSceneRef.value.scaleModel) {
+    return
+  }
+  
+  // Réduire de 20% (multiplier par 0.8)
+  threeSceneRef.value.scaleModel(0.8)
+}
+
 const on3DClickForPlacement = (clickData) => {
   // Vérifier que le clic est dans la zone active (pas null)
   // Les clics hors zone retournent null
@@ -594,17 +612,7 @@ const on3DClickForPlacement = (clickData) => {
   const uvU = clickData.uv?.x || 0
   const isOnSeam = uvU < seamThreshold || uvU > (1 - seamThreshold)
   
-  // Si le clic est sur la couture, ajouter un point vert
-  if (isOnSeam && clickData.uv) {
-    
-    if (fabricDesignerRef.value && fabricDesignerRef.value.addSeamPoint) {
-      fabricDesignerRef.value.addSeamPoint(clickData.canvasX, clickData.canvasY)
-      nextTick(() => {
-        updateAllObjectsList()
-      })
-    }
-    return
-  }
+  // Fonctionnalité de point vert sur la couture supprimée
   
   // Si on est en mode placement, placer un nouvel élément
   if (placementMode.value && placementType.value) {

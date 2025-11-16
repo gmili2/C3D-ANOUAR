@@ -79,6 +79,10 @@
           @texture-ready="onTextureReady"
           @3d-click="on3DClickForPlacement"
           @3d-click-outside="on3DClickOutside"
+          @3d-rotation-click="on3DRotationClick"
+          @3d-rotation-start="on3DRotationStart"
+          @3d-rotation="on3DRotation"
+          @3d-rotation-end="on3DRotationEnd"
           @3d-drag="on3DDrag"
           @3d-drag-start="on3DDragStart"
           @3d-drag-end="on3DDragEnd"
@@ -174,11 +178,11 @@
             </div> -->
           </div>
         </div>
-        
+        <pre> {{ canvasHeight }}</pre>
         <FabricDesigner
           ref="fabricDesignerRef"
-          :canvas-width="canvasWidth"
-          :canvas-height="canvasHeight"
+          :canvas-width="500"
+          :canvas-height="500"
           :work-zone-top="workZoneTop / 100"
           :work-zone-bottom="workZoneBottom / 100"
           @design-updated="onDesignUpdated"
@@ -648,6 +652,95 @@ const on3DClickForPlacement = (clickData) => {
   }
 }
 
+/**
+ * Gère le clic sur le contrôle de rotation (mtr) dans la vue 3D
+ * Active la rotation de l'élément sélectionné dans le canvas 2D
+ */
+const on3DRotationClick = (clickData) => {
+  if (!fabricDesignerRef.value) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  if (!activeObject || activeObject.userData?.isWorkZoneIndicator) return
+  
+  // Activer le mode rotation en simulant un clic sur le contrôle mtr
+  if (fabricDesignerRef.value.activateRotationMode && clickData.mtrCoords) {
+    fabricDesignerRef.value.activateRotationMode(activeObject, clickData.mtrCoords)
+  }
+}
+
+// Variable pour stocker l'angle initial de l'objet au début de la rotation
+let rotationInitialAngle = 0
+
+/**
+ * Gère le début de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
+ */
+const on3DRotationStart = (rotationData) => {
+  if (!fabricDesignerRef.value) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  if (!activeObject || activeObject.userData?.isWorkZoneIndicator) return
+  
+  // Stocker l'angle initial de l'objet
+  rotationInitialAngle = activeObject.angle || 0
+}
+
+/**
+ * Gère la rotation en cours depuis le contrôle de rotation (mtr) dans la vue 3D
+ * Applique la rotation à l'élément dans le canvas 2D
+ */
+const on3DRotation = (rotationData) => {
+  if (!fabricDesignerRef.value) return
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  if (!activeObject || activeObject.userData?.isWorkZoneIndicator) return
+  
+  // Calculer le nouvel angle en ajoutant la différence d'angle à l'angle initial
+  const newAngle = rotationInitialAngle + rotationData.angle
+  
+  // Appliquer la rotation à l'objet dans le canvas 2D
+  activeObject.set({ angle: newAngle })
+  activeObject.setCoords()
+  canvas.renderAll()
+  
+  // Mettre à jour les coordonnées des contrôles dans ThreeScene pour refléter la nouvelle rotation
+  if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+    threeSceneRef.value.updateSelectedObjectCoords(activeObject)
+  }
+  
+  // La rotation dans le canvas 2D déclenchera automatiquement l'événement 'object-rotated'
+  // qui appliquera la rotation dans la vue 3D via rotateModel
+}
+
+/**
+ * Gère la fin de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
+ */
+const on3DRotationEnd = () => {
+  rotationInitialAngle = 0
+  
+  // Mettre à jour les coordonnées de l'objet sélectionné pour actualiser la position du mtr
+  if (fabricDesignerRef.value) {
+    const canvas = fabricDesignerRef.value.getCanvas()
+    if (canvas) {
+      const activeObject = canvas.getActiveObject()
+      if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Mettre à jour les coordonnées dans ThreeScene
+        if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+          threeSceneRef.value.updateSelectedObjectCoords(activeObject)
+        }
+      }
+    }
+  }
+}
+
 const onModelError = (error) => {
   errorMessage.value = `Erreur lors du chargement: ${error.message}`
   uploadedModel.value = null
@@ -939,6 +1032,11 @@ const on3DHover = (hoverData) => {
     }
     currentHoveredHandle.value = null
     
+    // Réinitialiser le flag de rotation
+    if (threeSceneRef.value && threeSceneRef.value.setRotationHandleHover) {
+      threeSceneRef.value.setRotationHandleHover(false)
+    }
+    
       // Remettre le curseur par défaut (move pour déplacement)
       if (threeSceneRef.value && threeSceneRef.value.renderer) {
         const element = threeSceneRef.value.renderer.domElement
@@ -957,6 +1055,86 @@ const on3DHover = (hoverData) => {
     )
     
     if (handleInfo) {
+      // Calculer la distance au contrôle détecté
+      let distance = null
+      
+      // Pour tous les contrôles, calculer la distance
+      const objLeft = activeObject.left || 0
+      const objTop = activeObject.top || 0
+      const objWidth = (activeObject.width || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleX || 1)
+      const objHeight = (activeObject.height || (activeObject.radius ? activeObject.radius * 2 : 50)) * (activeObject.scaleY || 1)
+      const objRight = objLeft + objWidth
+      const objBottom = objTop + objHeight
+      
+      let controlX = 0
+      let controlY = 0
+      
+      if (handleInfo.isRotation) {
+        // Pour le contrôle de rotation, utiliser les coordonnées calculées dans detectResizeHandle
+        // On doit recalculer la position du mtr
+        if (activeObject.setCoords) {
+          activeObject.setCoords()
+        }
+        const coords = activeObject.oCoords || activeObject.calcCoords()
+        if (coords && coords.tl && coords.tr) {
+          const centerTopX = (coords.tl.x + coords.tr.x) / 2
+          const centerTopY = (coords.tl.y + coords.tr.y) / 2
+          const dx = coords.tr.x - coords.tl.x
+          const dy = coords.tr.y - coords.tl.y
+          const length = Math.sqrt(dx * dx + dy * dy)
+          
+          if (Math.abs(dy) < 0.01) {
+            controlX = centerTopX
+            controlY = centerTopY - 30
+          } else {
+            // Rectangle roté : utiliser (dy, -dx) pour pointer vers le haut (au-dessus du bord)
+            const offset = 30
+            controlX = centerTopX + (dy / length) * offset
+            controlY = centerTopY - (dx / length) * offset
+          }
+        }
+      } else if (handleInfo.corner) {
+        if (handleInfo.corner === 'tl') {
+          controlX = objLeft
+          controlY = objTop
+        } else if (handleInfo.corner === 'tr') {
+          controlX = objRight
+          controlY = objTop
+        } else if (handleInfo.corner === 'bl') {
+          controlX = objLeft
+          controlY = objBottom
+        } else if (handleInfo.corner === 'br') {
+          controlX = objRight
+          controlY = objBottom
+        }
+      } else if (handleInfo.edge) {
+        if (handleInfo.edge === 'left') {
+          controlX = objLeft
+          controlY = (objTop + objBottom) / 2
+        } else if (handleInfo.edge === 'right') {
+          controlX = objRight
+          controlY = (objTop + objBottom) / 2
+        } else if (handleInfo.edge === 'top') {
+          controlX = (objLeft + objRight) / 2
+          controlY = objTop
+        } else if (handleInfo.edge === 'bottom') {
+          controlX = (objLeft + objRight) / 2
+          controlY = objBottom
+        }
+      }
+      
+      if (controlX !== 0 || controlY !== 0) {
+        distance = Math.sqrt(
+          Math.pow(hoverData.canvasX - controlX, 2) + 
+          Math.pow(hoverData.canvasY - controlY, 2)
+        )
+      }
+      
+      // Mettre à jour l'état de débogage dans ThreeScene avec les coordonnées du contrôle
+      if (threeSceneRef.value && threeSceneRef.value.setDetectedControl) {
+        threeSceneRef.value.setDetectedControl(handleInfo, distance, controlX, controlY)
+      }
+      
       // Si c'est un nouveau handle, mettre à jour le style
       if (!currentHoveredHandle.value || 
           currentHoveredHandle.value.handle !== handleInfo.handle) {
@@ -998,6 +1176,9 @@ const on3DHover = (hoverData) => {
           } else if (handleInfo.edge === 'bottom') {
             cursor = 'ns-resize' // Vertical (nord-sud) pour le bas aussi
           }
+        } else if (handleInfo.isRotation) {
+          // Curseur pour le contrôle de rotation
+          cursor = 'grab' // Curseur de rotation
         }
         
         // Appliquer le curseur
@@ -1012,6 +1193,16 @@ const on3DHover = (hoverData) => {
             element.style.cursor = cursor
           }
         }
+        
+        // Informer ThreeScene si on survole le contrôle de rotation
+        if (threeSceneRef.value && threeSceneRef.value.setRotationHandleHover) {
+          threeSceneRef.value.setRotationHandleHover(handleInfo.isRotation || false)
+        }
+      } else {
+        // Plus de handle survolé, réinitialiser le flag de rotation
+        if (threeSceneRef.value && threeSceneRef.value.setRotationHandleHover) {
+          threeSceneRef.value.setRotationHandleHover(false)
+        }
       }
     } else {
       // Plus de handle survolé, réinitialiser le style
@@ -1020,6 +1211,16 @@ const on3DHover = (hoverData) => {
         if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
           fabricDesignerRef.value.resetResizeHover()
         }
+      }
+      
+      // Réinitialiser l'état de débogage
+      if (threeSceneRef.value && threeSceneRef.value.setDetectedControl) {
+        threeSceneRef.value.setDetectedControl(null)
+      }
+      
+      // Réinitialiser le flag de rotation
+      if (threeSceneRef.value && threeSceneRef.value.setRotationHandleHover) {
+        threeSceneRef.value.setRotationHandleHover(false)
       }
       
       if (threeSceneRef.value && threeSceneRef.value.renderer) {
@@ -1229,6 +1430,11 @@ const updateTextureRealTime = () => {
  * Chaque vue prend 100% de l'écran quand elle est active
  */
 const toggleView = () => {
+  // Réinitialiser l'état de rotation avant de changer de vue
+  if (threeSceneRef.value && threeSceneRef.value.resetRotationState) {
+    threeSceneRef.value.resetRotationState()
+  }
+  
   currentView.value = currentView.value === '3d' ? '2d' : '3d'
   // Maintenir la compatibilité avec showDesigner
   showDesigner.value = currentView.value === '2d'

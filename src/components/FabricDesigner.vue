@@ -70,6 +70,113 @@
     </div>
     <div class="fabric-canvas-wrapper">
       <canvas ref="canvasElement" class="fabric-canvas"></canvas>
+      <!-- Div de débogage pour afficher les coordonnées des contrôles -->
+      <div v-if="detectedControl2D.show" class="debug-control-2d">
+        <div class="coord-title">🔧 Contrôle Détecté (2D)</div>
+        <div class="coord-content">
+          <div class="coord-section">
+            <div class="coord-label">Handle:</div>
+            <div class="coord-value">{{ detectedControl2D.handle || 'Aucun' }}</div>
+          </div>
+          <div v-if="detectedControl2D.corner" class="coord-section">
+            <div class="coord-label">Coin:</div>
+            <div class="coord-value">{{ detectedControl2D.corner }}</div>
+          </div>
+          <div v-if="detectedControl2D.edge" class="coord-section">
+            <div class="coord-label">Bord:</div>
+            <div class="coord-value">{{ detectedControl2D.edge }}</div>
+          </div>
+          <div v-if="detectedControl2D.isRotation" class="coord-section">
+            <div class="coord-label">Type:</div>
+            <div class="coord-value">Rotation (mtr)</div>
+          </div>
+          <div v-if="detectedControl2D.distance !== null" class="coord-section">
+            <div class="coord-label">Distance:</div>
+            <div class="coord-value">{{ detectedControl2D.distance.toFixed(1) }}px</div>
+          </div>
+          <div v-if="detectedControl2D.x !== null && detectedControl2D.y !== null" class="coord-section">
+            <div class="coord-label">Coordonnées:</div>
+            <div class="coord-value">
+              X: {{ detectedControl2D.x.toFixed(1) }}, 
+              Y: {{ detectedControl2D.y.toFixed(1) }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Div de débogage pour afficher les coordonnées du curseur -->
+      <div class="cursor-coords-2d">
+        <div class="coord-title">🖱️ Curseur (2D)</div>
+        <div class="coord-content">
+          <div class="coord-section">
+            <div class="coord-label">X:</div>
+            <div class="coord-value">{{ cursorCoords2D.x !== null ? cursorCoords2D.x.toFixed(1) : '--' }}</div>
+          </div>
+          <div class="coord-section">
+            <div class="coord-label">Y:</div>
+            <div class="coord-value">{{ cursorCoords2D.y !== null ? cursorCoords2D.y.toFixed(1) : '--' }}</div>
+          </div>
+        </div>
+      </div>
+      <!-- Liste de tous les éléments avec leurs contrôles -->
+      <div v-if="allObjectsList2D.length > 0" class="objects-list-2d">
+        <div class="coord-title">📋 Éléments du Canvas ({{ allObjectsList2D.length }})</div>
+        <div class="objects-scroll-container">
+          <div 
+            v-for="(obj, index) in allObjectsList2D" 
+            :key="index"
+            class="object-item"
+            :class="{ 'selected': obj.isSelected }"
+          >
+            <div class="object-header">
+              <span class="object-type">{{ obj.type }}</span>
+              <span v-if="obj.isSelected" class="selected-badge">✓</span>
+            </div>
+            <div class="object-details">
+              <div class="object-detail-row">
+                <span>X:</span> {{ obj.left.toFixed(1) }}, 
+                <span>Y:</span> {{ obj.top.toFixed(1) }}
+              </div>
+              <div class="object-detail-row">
+                <span>W:</span> {{ obj.width.toFixed(1) }}, 
+                <span>H:</span> {{ obj.height.toFixed(1) }}
+              </div>
+              <div class="object-detail-row">
+                <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
+              </div>
+              <div v-if="obj.controls && Object.keys(obj.controls).length > 0" class="controls-section">
+                <div class="controls-title">Contrôles:</div>
+                <div v-if="obj.controls.tl" class="control-item">
+                  <span>tl:</span> ({{ obj.controls.tl.x.toFixed(1) }}, {{ obj.controls.tl.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.tr" class="control-item">
+                  <span>tr:</span> ({{ obj.controls.tr.x.toFixed(1) }}, {{ obj.controls.tr.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.bl" class="control-item">
+                  <span>bl:</span> ({{ obj.controls.bl.x.toFixed(1) }}, {{ obj.controls.bl.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.br" class="control-item">
+                  <span>br:</span> ({{ obj.controls.br.x.toFixed(1) }}, {{ obj.controls.br.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.mt" class="control-item">
+                  <span>mt:</span> ({{ obj.controls.mt.x.toFixed(1) }}, {{ obj.controls.mt.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.mb" class="control-item">
+                  <span>mb:</span> ({{ obj.controls.mb.x.toFixed(1) }}, {{ obj.controls.mb.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.ml" class="control-item">
+                  <span>ml:</span> ({{ obj.controls.ml.x.toFixed(1) }}, {{ obj.controls.ml.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.mr" class="control-item">
+                  <span>mr:</span> ({{ obj.controls.mr.x.toFixed(1) }}, {{ obj.controls.mr.y.toFixed(1) }})
+                </div>
+                <div v-if="obj.controls.mtr" class="control-item">
+                  <span>mtr:</span> ({{ obj.controls.mtr.x.toFixed(1) }}, {{ obj.controls.mtr.y.toFixed(1) }})
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -138,6 +245,28 @@ const isDrawMode = ref(false)    // Mode dessin libre actif
 const drawColor = ref('#000000')  // Couleur du pinceau
 const drawWidth = ref(5)          // Largeur du pinceau en pixels
 const placementMode = ref(null)   // Mode placement: null, 'circle', 'rectangle', 'text', 'image'
+
+// ===== DÉBOGAGE DES CONTRÔLES 2D =====
+const detectedControl2D = ref({
+  show: false,
+  handle: null,
+  corner: null,
+  edge: null,
+  isRotation: false,
+  distance: null,
+  x: null,
+  y: null
+})
+
+// ===== LISTE DE TOUS LES OBJETS 2D =====
+const allObjectsList2D = ref([])
+let isUpdatingObjectsList2D = false
+
+// ===== COORDONNÉES DU CURSEUR 2D =====
+const cursorCoords2D = ref({
+  x: null,
+  y: null
+})
 
 // ===== DIMENSIONS DU CANVAS =====
 // Dimensions réduites pour mieux correspondre au modèle 3D
@@ -1168,7 +1297,9 @@ const initCanvas = () => {
     saveHistory()
     
     // Écouter quand un objet est sélectionné pour activer le mode drag sur 3D
+    // Mettre à jour la liste quand un objet est sélectionné
     canvas.on('selection:created', (e) => {
+      updateObjectsList2D()
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
         // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
@@ -1298,6 +1429,8 @@ const initCanvas = () => {
         canvas.userData.multiSelectedObjects = []
       }
       emit('object-deselected')
+      // Mettre à jour la liste des objets 2D
+      updateObjectsList2D()
     })
     
     // Écouter tous les événements de modification et sauvegarder l'historique
@@ -1310,8 +1443,12 @@ const initCanvas = () => {
       signalChange()
       // Notifier le parent pour mettre à jour la liste des objets
       emit('objects-changed')
+      // Mettre à jour la liste des objets 2D
+      updateObjectsList2D()
     })
     canvas.on('object:modified', (e) => {
+      // Mettre à jour la liste des objets 2D après modification
+      updateObjectsList2D()
       // Ne pas sauvegarder pendant la modification, seulement après
       const obj = e.target
       
@@ -1334,6 +1471,8 @@ const initCanvas = () => {
       }
     })
     canvas.on('object:removed', (e) => {
+      // Mettre à jour la liste des objets 2D après suppression
+      updateObjectsList2D()
       const obj = e.target
       // Supprimer les copies wrap-around si l'objet original est supprimé
       if (obj && !obj.userData?.isWrapAroundCopy) {
@@ -1448,6 +1587,8 @@ const initCanvas = () => {
     })
     // Événement après le redimensionnement (scaling terminé)
     canvas.on('object:scaled', (e) => {
+      // Mettre à jour la liste des objets 2D après redimensionnement
+      updateObjectsList2D()
       const obj = e.target
       
       // Synchroniser les copies wrap-around si l'objet redimensionné est un original
@@ -1474,6 +1615,14 @@ const initCanvas = () => {
     })
     canvas.on('object:rotated', (e) => {
       const obj = e.target
+      
+      // S'assurer que les coordonnées sont à jour après la rotation
+      if (obj && obj.setCoords) {
+        obj.setCoords()
+      }
+      
+      // Mettre à jour la liste des objets 2D après rotation
+      updateObjectsList2D()
       
       // Synchroniser les copies wrap-around si l'objet roté est un original
       if (obj && !obj.userData?.isWorkZoneIndicator && !obj.userData?.isWrapAroundCopy) {
@@ -1502,6 +1651,83 @@ const initCanvas = () => {
     canvas.on('object:skewed', () => {
       saveHistory()
       signalChange()
+    })
+    
+    // Événement mousemove pour détecter les contrôles et afficher leurs coordonnées
+    canvas.on('mouse:move', (e) => {
+      if (!canvas) return
+      
+      const pointer = canvas.getPointer(e.e)
+      const x = pointer.x
+      const y = pointer.y
+      
+      // Mettre à jour les coordonnées du curseur
+      cursorCoords2D.value = {
+        x: x,
+        y: y
+      }
+      
+      // Chercher l'objet actif (sélectionné)
+      const activeObject = canvas.getActiveObject()
+      
+      if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Détecter le contrôle survolé
+        const handleInfo = detectResizeHandle(activeObject, x, y, 10)
+        
+        if (handleInfo) {
+          // Calculer les coordonnées des contrôles
+          const controls = calculateControlCoordinates2D(activeObject)
+          const controlKey = handleInfo.handle
+          const controlCoords = controls[controlKey]
+          
+          // Calculer la distance au contrôle
+          let distance = null
+          let controlX = null
+          let controlY = null
+          
+          if (controlCoords) {
+            controlX = controlCoords.x
+            controlY = controlCoords.y
+            distance = Math.sqrt(Math.pow(x - controlX, 2) + Math.pow(y - controlY, 2))
+          }
+          
+          // Mettre à jour l'état de débogage
+          detectedControl2D.value = {
+            show: true,
+            handle: handleInfo.handle || null,
+            corner: handleInfo.corner || null,
+            edge: handleInfo.edge || null,
+            isRotation: handleInfo.isRotation || false,
+            distance: distance,
+            x: controlX,
+            y: controlY
+          }
+        } else {
+          // Aucun contrôle détecté
+          detectedControl2D.value = {
+            show: false,
+            handle: null,
+            corner: null,
+            edge: null,
+            isRotation: false,
+            distance: null,
+            x: null,
+            y: null
+          }
+        }
+      } else {
+        // Aucun objet sélectionné
+        detectedControl2D.value = {
+          show: false,
+          handle: null,
+          corner: null,
+          edge: null,
+          isRotation: false,
+          distance: null,
+          x: null,
+          y: null
+        }
+      }
     })
     canvas.on('selection:created', () => {
       // Ne pas mettre à jour pour la sélection, juste le rendu
@@ -1582,9 +1808,11 @@ const initCanvas = () => {
                           finalY = centerTopY - 30 // Directement au-dessus (Y diminue vers le haut)
                         } else {
                           // Rectangle roté : utiliser le calcul vectoriel
+                          // Le vecteur perpendiculaire à (dx, dy) est (-dy, dx) ou (dy, -dx)
+                          // On choisit (dy, -dx) pour pointer vers le haut (au-dessus du bord)
                           const offset = 30 // Distance au-dessus du bord
-                          finalX = centerTopX - (dy / length) * offset
-                          finalY = centerTopY + (dx / length) * offset
+                          finalX = centerTopX + (dy / length) * offset
+                          finalY = centerTopY - (dx / length) * offset
                         }
                         break
                       default:
@@ -2445,52 +2673,413 @@ const findObjectAtPosition = (x, y) => {
 const detectResizeHandle = (obj, x, y, threshold = 10) => {
   if (!obj) return null
   
-  const objLeft = obj.left || 0
-  const objTop = obj.top || 0
-  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-  const objRight = objLeft + objWidth
-  const objBottom = objTop + objHeight
+  // Toujours utiliser les coordonnées transformées pour détecter les contrôles
+  // Cela garantit que la détection fonctionne correctement après rotation
+  if (obj.setCoords) {
+    obj.setCoords() // S'assurer que les coordonnées sont à jour
+  }
+  
+  const coords = obj.calcCoords ? obj.calcCoords() : (obj.oCoords || null)
+  if (!coords || !coords.tl || !coords.tr || !coords.bl || !coords.br) {
+    return null
+  }
+  
+  // Utiliser les coordonnées transformées des coins
+  const tl = coords.tl
+  const tr = coords.tr
+  const bl = coords.bl
+  const br = coords.br
   
   // Vérifier les coins en premier (priorité)
   const cornerThreshold = threshold * 1.5 // Un peu plus large pour les coins
   
   // Coin haut-gauche (top-left)
-  if (Math.abs(x - objLeft) < cornerThreshold && Math.abs(y - objTop) < cornerThreshold) {
+  const distTL = Math.sqrt(Math.pow(x - tl.x, 2) + Math.pow(y - tl.y, 2))
+  if (distTL < cornerThreshold) {
     return { edge: 'corner', corner: 'tl', handle: 'tl' }
   }
+  
   // Coin haut-droite (top-right)
-  if (Math.abs(x - objRight) < cornerThreshold && Math.abs(y - objTop) < cornerThreshold) {
+  const distTR = Math.sqrt(Math.pow(x - tr.x, 2) + Math.pow(y - tr.y, 2))
+  if (distTR < cornerThreshold) {
     return { edge: 'corner', corner: 'tr', handle: 'tr' }
   }
+  
   // Coin bas-gauche (bottom-left)
-  if (Math.abs(x - objLeft) < cornerThreshold && Math.abs(y - objBottom) < cornerThreshold) {
+  const distBL = Math.sqrt(Math.pow(x - bl.x, 2) + Math.pow(y - bl.y, 2))
+  if (distBL < cornerThreshold) {
     return { edge: 'corner', corner: 'bl', handle: 'bl' }
   }
+  
   // Coin bas-droite (bottom-right)
-  if (Math.abs(x - objRight) < cornerThreshold && Math.abs(y - objBottom) < cornerThreshold) {
+  const distBR = Math.sqrt(Math.pow(x - br.x, 2) + Math.pow(y - br.y, 2))
+  if (distBR < cornerThreshold) {
     return { edge: 'corner', corner: 'br', handle: 'br' }
   }
   
-  // Vérifier les bords
-  // Bord gauche
-  if (Math.abs(x - objLeft) < threshold && y >= objTop && y <= objBottom) {
-    return { edge: 'left', corner: null, handle: 'ml' }
+  // Vérifier les bords en utilisant la distance perpendiculaire à chaque bord
+  // Mais exclure les zones proches des coins pour éviter les conflits
+  
+  // Bord haut (entre tl et tr)
+  const distToTopEdge = distanceToLineSegment(x, y, tl.x, tl.y, tr.x, tr.y)
+  if (distToTopEdge < threshold) {
+    // Vérifier que le point n'est pas trop proche des coins
+    // Calculer la position du point le plus proche sur le segment
+    const topDx = tr.x - tl.x
+    const topDy = tr.y - tl.y
+    const topLength2 = topDx * topDx + topDy * topDy
+    if (topLength2 > 0) {
+      const t = Math.max(0, Math.min(1, ((x - tl.x) * topDx + (y - tl.y) * topDy) / topLength2))
+      const closestX = tl.x + t * topDx
+      const closestY = tl.y + t * topDy
+      // Calculer la distance le long du bord depuis les coins
+      const distFromTL = Math.sqrt(Math.pow(closestX - tl.x, 2) + Math.pow(closestY - tl.y, 2))
+      const distFromTR = Math.sqrt(Math.pow(closestX - tr.x, 2) + Math.pow(closestY - tr.y, 2))
+      const topEdgeLength = Math.sqrt(topLength2)
+      // Exclure les 20% de chaque extrémité du bord (zones des coins)
+      const excludeZone = topEdgeLength * 0.2
+      if (distFromTL > excludeZone && distFromTR > excludeZone) {
+        return { edge: 'top', corner: null, handle: 'mt' }
+      }
+    }
   }
-  // Bord droit
-  if (Math.abs(x - objRight) < threshold && y >= objTop && y <= objBottom) {
-    return { edge: 'right', corner: null, handle: 'mr' }
+  
+  // Bord bas (entre bl et br)
+  const distToBottomEdge = distanceToLineSegment(x, y, bl.x, bl.y, br.x, br.y)
+  if (distToBottomEdge < threshold) {
+    const bottomDx = br.x - bl.x
+    const bottomDy = br.y - bl.y
+    const bottomLength2 = bottomDx * bottomDx + bottomDy * bottomDy
+    if (bottomLength2 > 0) {
+      const t = Math.max(0, Math.min(1, ((x - bl.x) * bottomDx + (y - bl.y) * bottomDy) / bottomLength2))
+      const closestX = bl.x + t * bottomDx
+      const closestY = bl.y + t * bottomDy
+      const distFromBL = Math.sqrt(Math.pow(closestX - bl.x, 2) + Math.pow(closestY - bl.y, 2))
+      const distFromBR = Math.sqrt(Math.pow(closestX - br.x, 2) + Math.pow(closestY - br.y, 2))
+      const bottomEdgeLength = Math.sqrt(bottomLength2)
+      const excludeZone = bottomEdgeLength * 0.2
+      if (distFromBL > excludeZone && distFromBR > excludeZone) {
+        return { edge: 'bottom', corner: null, handle: 'mb' }
+      }
+    }
   }
-  // Bord haut
-  if (Math.abs(y - objTop) < threshold && x >= objLeft && x <= objRight) {
-    return { edge: 'top', corner: null, handle: 'mt' }
+  
+  // Bord gauche (entre tl et bl)
+  const distToLeftEdge = distanceToLineSegment(x, y, tl.x, tl.y, bl.x, bl.y)
+  if (distToLeftEdge < threshold) {
+    const leftDx = bl.x - tl.x
+    const leftDy = bl.y - tl.y
+    const leftLength2 = leftDx * leftDx + leftDy * leftDy
+    if (leftLength2 > 0) {
+      const t = Math.max(0, Math.min(1, ((x - tl.x) * leftDx + (y - tl.y) * leftDy) / leftLength2))
+      const closestX = tl.x + t * leftDx
+      const closestY = tl.y + t * leftDy
+      const distFromTL = Math.sqrt(Math.pow(closestX - tl.x, 2) + Math.pow(closestY - tl.y, 2))
+      const distFromBL = Math.sqrt(Math.pow(closestX - bl.x, 2) + Math.pow(closestY - bl.y, 2))
+      const leftEdgeLength = Math.sqrt(leftLength2)
+      const excludeZone = leftEdgeLength * 0.2
+      if (distFromTL > excludeZone && distFromBL > excludeZone) {
+        return { edge: 'left', corner: null, handle: 'ml' }
+      }
+    }
   }
-  // Bord bas
-  if (Math.abs(y - objBottom) < threshold && x >= objLeft && x <= objRight) {
-    return { edge: 'bottom', corner: null, handle: 'mb' }
+  
+  // Bord droit (entre tr et br)
+  const distToRightEdge = distanceToLineSegment(x, y, tr.x, tr.y, br.x, br.y)
+  if (distToRightEdge < threshold) {
+    const rightDx = br.x - tr.x
+    const rightDy = br.y - tr.y
+    const rightLength2 = rightDx * rightDx + rightDy * rightDy
+    if (rightLength2 > 0) {
+      const t = Math.max(0, Math.min(1, ((x - tr.x) * rightDx + (y - tr.y) * rightDy) / rightLength2))
+      const closestX = tr.x + t * rightDx
+      const closestY = tr.y + t * rightDy
+      const distFromTR = Math.sqrt(Math.pow(closestX - tr.x, 2) + Math.pow(closestY - tr.y, 2))
+      const distFromBR = Math.sqrt(Math.pow(closestX - br.x, 2) + Math.pow(closestY - br.y, 2))
+      const rightEdgeLength = Math.sqrt(rightLength2)
+      const excludeZone = rightEdgeLength * 0.2
+      if (distFromTR > excludeZone && distFromBR > excludeZone) {
+        return { edge: 'right', corner: null, handle: 'mr' }
+      }
+    }
+  }
+  
+  // Vérifier le contrôle de rotation (mtr - middle-top-rotation)
+  // Position au-dessus du centre du haut
+  const centerTopX = (tl.x + tr.x) / 2
+  const centerTopY = (tl.y + tr.y) / 2
+  // Calculer un vecteur perpendiculaire vers le haut
+  const dx = tr.x - tl.x
+  const dy = tr.y - tl.y
+  const length = Math.sqrt(dx * dx + dy * dy)
+  
+  let rotationHandleX, rotationHandleY
+  if (length < 0.01) {
+    // Cas dégénéré : les points sont confondus
+    return null
+  }
+  
+  if (Math.abs(dy) < 0.01) {
+    // Rectangle non roté : positionner directement au-dessus
+    rotationHandleX = centerTopX
+    rotationHandleY = centerTopY - 30 // Directement au-dessus (Y diminue vers le haut)
+  } else {
+    // Rectangle roté : utiliser le calcul vectoriel
+    // Le vecteur perpendiculaire à (dx, dy) peut être (-dy, dx) ou (dy, -dx)
+    // On choisit (dy, -dx) pour pointer vers le haut (au-dessus du bord)
+    const offset = 30 // Distance au-dessus du bord
+    rotationHandleX = centerTopX + (dy / length) * offset
+    rotationHandleY = centerTopY - (dx / length) * offset
+  }
+  
+  const rotationThreshold = threshold * 1.5 // Zone un peu plus large pour le contrôle de rotation
+  const distToMTR = Math.sqrt(Math.pow(x - rotationHandleX, 2) + Math.pow(y - rotationHandleY, 2))
+  
+  if (distToMTR < rotationThreshold) {
+    return { edge: null, corner: null, handle: 'mtr', isRotation: true }
   }
   
   return null
+}
+
+/**
+ * Calcule la distance d'un point à un segment de ligne
+ * @param {number} px - Coordonnée X du point
+ * @param {number} py - Coordonnée Y du point
+ * @param {number} x1 - Coordonnée X du premier point du segment
+ * @param {number} y1 - Coordonnée Y du premier point du segment
+ * @param {number} x2 - Coordonnée X du second point du segment
+ * @param {number} y2 - Coordonnée Y du second point du segment
+ * @returns {number} - Distance minimale du point au segment
+ */
+const distanceToLineSegment = (px, py, x1, y1, x2, y2) => {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const length2 = dx * dx + dy * dy
+  
+  if (length2 === 0) {
+    // Les deux points sont confondus
+    return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
+  }
+  
+  // Paramètre t pour le point le plus proche sur le segment
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / length2))
+  
+  // Point le plus proche sur le segment
+  const closestX = x1 + t * dx
+  const closestY = y1 + t * dy
+  
+  // Distance du point au point le plus proche
+  return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
+}
+
+/**
+ * Calcule les coordonnées de tous les contrôles pour un objet Fabric.js
+ * 
+ * EXPLICATION : Comment les coordonnées des contrôles changent lors de la rotation
+ * ================================================================================
+ * 
+ * 1. RECALCUL DES COORDONNÉES DE BASE (coords)
+ *    ------------------------------------------
+ *    Quand un objet est roté, Fabric.js stocke l'angle dans obj.angle.
+ *    Les coordonnées des coins (tl, tr, bl, br) sont recalculées automatiquement
+ *    par Fabric.js via setCoords() ou calcCoords() en appliquant une transformation
+ *    de rotation autour du centre de l'objet.
+ * 
+ *    Exemple : Un rectangle à 0° avec tl(100, 100), tr(200, 100)
+ *              Après rotation de 45° : les coordonnées changent selon :
+ *              x' = centerX + (x - centerX) * cos(angle) - (y - centerY) * sin(angle)
+ *              y' = centerY + (x - centerX) * sin(angle) + (y - centerY) * cos(angle)
+ * 
+ * 2. POSITIONNEMENT DES CONTRÔLES
+ *    -----------------------------
+ *    Les contrôles utilisent les coordonnées transformées (coords) qui sont
+ *    déjà calculées par Fabric.js après rotation :
+ * 
+ *    a) COINS (tl, tr, bl, br) :
+ *       → Utilisent directement les coordonnées transformées
+ *       → Exemple : controls.tl = { x: coords.tl.x, y: coords.tl.y }
+ *       → Ces coordonnées changent automatiquement car coords.tl est déjà roté
+ * 
+ *    b) BORDS (mt, mb, ml, mr) :
+ *       → Calculés comme la moyenne des deux coins adjacents
+ *       → Exemple : mt = milieu entre tl et tr
+ *       → mt.x = (coords.tl.x + coords.tr.x) / 2
+ *       → mt.y = (coords.tl.y + coords.tr.y) / 2
+ *       → Comme tl et tr sont déjà rotés, mt suit automatiquement la rotation
+ * 
+ *    c) CONTRÔLE DE ROTATION (mtr) :
+ *       → Positionné perpendiculairement au bord supérieur
+ *       → Utilise un calcul vectoriel pour trouver la direction perpendiculaire :
+ *         - Vecteur du bord : dx = tr.x - tl.x, dy = tr.y - tl.y
+ *         - Vecteur perpendiculaire vers le haut : (dy, -dx) normalisé
+ *         - Position = centre du bord + offset * vecteur perpendiculaire
+ *       → Formule : 
+ *         x = centerTopX + (dy / length) * offset
+ *         y = centerTopY - (dx / length) * offset
+ *       → Ce calcul garantit que mtr reste toujours au-dessus du bord (côté opposé à bl),
+ *         même après rotation
+ * 
+ * 3. POURQUOI ÇA FONCTIONNE
+ *    -----------------------
+ *    Fabric.js gère automatiquement la transformation des coordonnées lors de la rotation.
+ *    Quand on appelle setCoords() ou calcCoords(), Fabric.js :
+ *    - Prend les coordonnées locales de l'objet (non roté)
+ *    - Applique la transformation de rotation
+ *    - Retourne les coordonnées dans l'espace du canvas (déjà rotées)
+ * 
+ *    Donc, on n'a pas besoin de calculer manuellement la rotation des contrôles :
+ *    on utilise simplement les coordonnées transformées que Fabric.js nous donne !
+ * 
+ * @param {fabric.Object} obj - L'objet Fabric.js
+ * @returns {Object} - Objet contenant les coordonnées de tous les contrôles
+ */
+const calculateControlCoordinates2D = (obj) => {
+  if (!obj) return {}
+  
+  // ÉTAPE 1 : Recalculer les coordonnées transformées de l'objet
+  // Fabric.js calcule automatiquement les nouvelles positions des coins
+  // après rotation en utilisant la matrice de transformation
+  let coords = null
+  try {
+    if (obj.setCoords) {
+      obj.setCoords() // Force le recalcul des coordonnées transformées
+    }
+    coords = obj.calcCoords ? obj.calcCoords() : obj.oCoords
+    // coords contient maintenant tl, tr, bl, br avec leurs nouvelles positions rotées
+  } catch (e) {
+    console.warn('Erreur lors de calcCoords:', e)
+    coords = obj.oCoords || null
+  }
+  
+  if (!coords || !coords.tl) return {}
+  
+  const controls = {}
+  
+  // ÉTAPE 2a : COINS - Utiliser directement les coordonnées transformées
+  // Ces coordonnées sont déjà rotées par Fabric.js, donc on les copie telles quelles
+  if (coords.tl) {
+    controls.tl = { x: coords.tl.x, y: coords.tl.y } // Top-left (déjà roté)
+  }
+  if (coords.tr) {
+    controls.tr = { x: coords.tr.x, y: coords.tr.y } // Top-right (déjà roté)
+  }
+  if (coords.bl) {
+    controls.bl = { x: coords.bl.x, y: coords.bl.y } // Bottom-left (déjà roté)
+  }
+  if (coords.br) {
+    controls.br = { x: coords.br.x, y: coords.br.y } // Bottom-right (déjà roté)
+  }
+  
+  // ÉTAPE 2b : BORDS - Moyenne des deux coins adjacents (déjà rotés)
+  // Comme les coins sont rotés, la moyenne donne automatiquement le bon milieu roté
+  if (coords.tl && coords.tr) {
+    controls.mt = { 
+      x: (coords.tl.x + coords.tr.x) / 2, // Milieu horizontal du bord supérieur
+      y: (coords.tl.y + coords.tr.y) / 2  // (déjà roté car tl et tr le sont)
+    }
+  }
+  if (coords.bl && coords.br) {
+    controls.mb = { 
+      x: (coords.bl.x + coords.br.x) / 2, // Milieu du bord inférieur
+      y: (coords.bl.y + coords.br.y) / 2  // (déjà roté)
+    }
+  }
+  if (coords.tl && coords.bl) {
+    controls.ml = { 
+      x: (coords.tl.x + coords.bl.x) / 2, // Milieu du bord gauche
+      y: (coords.tl.y + coords.bl.y) / 2  // (déjà roté)
+    }
+  }
+  if (coords.tr && coords.br) {
+    controls.mr = { 
+      x: (coords.tr.x + coords.br.x) / 2, // Milieu du bord droit
+      y: (coords.tr.y + coords.br.y) / 2  // (déjà roté)
+    }
+  }
+  
+  // ÉTAPE 2c : CONTRÔLE DE ROTATION (mtr) - Calcul vectoriel perpendiculaire
+  // Ce contrôle doit rester au-dessus du bord supérieur, même après rotation
+  if (coords.tl && coords.tr) {
+    // Centre du bord supérieur (déjà roté)
+    const centerTopX = (coords.tl.x + coords.tr.x) / 2
+    const centerTopY = (coords.tl.y + coords.tr.y) / 2
+    
+    // Vecteur du bord supérieur (de tl vers tr)
+    // Ce vecteur indique la direction du bord après rotation
+    const dx = coords.tr.x - coords.tl.x
+    const dy = coords.tr.y - coords.tl.y
+    const length = Math.sqrt(dx * dx + dy * dy)
+    
+    // Cas spécial : objet non roté (bord horizontal)
+    if (Math.abs(dy) < 0.01) {
+      // Rectangle non roté : positionner directement au-dessus (Y diminue vers le haut)
+      controls.mtr = { 
+        x: centerTopX, 
+        y: centerTopY - 30 
+      }
+    } else {
+      // Rectangle roté : utiliser le calcul vectoriel
+      // Le vecteur perpendiculaire à (dx, dy) peut être (-dy, dx) ou (dy, -dx)
+      // On choisit (dy, -dx) pour pointer vers le haut (au-dessus du bord)
+      // Cela garantit que mtr est toujours du côté opposé à bl (en haut)
+      const offset = 30 // Distance au-dessus du bord
+      controls.mtr = { 
+        // Formule : position = centre + offset * vecteur_perpendiculaire_normalisé_vers_le_haut
+        x: centerTopX + (dy / length) * offset, // Composante X du vecteur perpendiculaire (inversée)
+        y: centerTopY - (dx / length) * offset   // Composante Y du vecteur perpendiculaire (inversée)
+      }
+    }
+  }
+  
+  return controls
+}
+
+/**
+ * Met à jour la liste de tous les objets du canvas avec leurs contrôles
+ */
+const updateObjectsList2D = () => {
+  // Éviter les mises à jour récursives
+  if (isUpdatingObjectsList2D || !canvas) {
+    return
+  }
+  
+  isUpdatingObjectsList2D = true
+  
+  try {
+    const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+    const activeObject = canvas.getActiveObject()
+    
+    allObjectsList2D.value = objects.map((obj, index) => {
+      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+      
+      // Vérifier si cet objet est sélectionné
+      const isSelected = activeObject && (
+        (obj.id && activeObject.id && obj.id === activeObject.id) ||
+        obj === activeObject
+      )
+      
+      // Calculer les coordonnées des contrôles
+      const controls = calculateControlCoordinates2D(obj)
+      
+      return {
+        id: obj.id || `obj-${index}`,
+        type: obj.type || 'unknown',
+        left: obj.left || 0,
+        top: obj.top || 0,
+        width: objWidth,
+        height: objHeight,
+        opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
+        isSelected: isSelected,
+        controls: controls
+      }
+    })
+  } finally {
+    nextTick(() => {
+      isUpdatingObjectsList2D = false
+    })
+  }
 }
 
 /**
@@ -2740,9 +3329,19 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   const initialWidth = originalWidth * initialScale.scaleX
   const initialHeight = originalHeight * initialScale.scaleY
   
+  // Obtenir l'angle de rotation de l'objet (en radians)
+  const angle = (activeObject.angle || 0) * Math.PI / 180
+  const cosAngle = Math.cos(-angle) // Angle négatif pour la transformation inverse
+  const sinAngle = Math.sin(-angle)
+  
   // Calculer les différences de position depuis le début du resize
   const deltaX = x - startX
   const deltaY = y - startY
+  
+  // Transformer les deltas dans le système de coordonnées local de l'objet
+  // (en tenant compte de sa rotation)
+  const localDeltaX = deltaX * cosAngle - deltaY * sinAngle
+  const localDeltaY = deltaX * sinAngle + deltaY * cosAngle
   
   let newScaleX = initialScale.scaleX
   let newScaleY = initialScale.scaleY
@@ -2750,42 +3349,48 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   let newTop = initialScale.top
   
   // Calculer le nouveau scale et position selon le handle
+  // Utiliser les deltas locaux pour un redimensionnement correct après rotation
   if (handleInfo.corner) {
     // Redimensionnement par coin (scale proportionnel)
     if (handleInfo.corner === 'br') {
       // Coin bas-droite : scale depuis le coin haut-gauche
-      newScaleX = (initialWidth + deltaX) / originalWidth
-      newScaleY = (initialHeight + deltaY) / originalHeight
+      newScaleX = (initialWidth + localDeltaX) / originalWidth
+      newScaleY = (initialHeight + localDeltaY) / originalHeight
     } else if (handleInfo.corner === 'tl') {
       // Coin haut-gauche : scale depuis le coin bas-droite
-      newScaleX = (initialWidth - deltaX) / originalWidth
-      newScaleY = (initialHeight - deltaY) / originalHeight
+      newScaleX = (initialWidth - localDeltaX) / originalWidth
+      newScaleY = (initialHeight - localDeltaY) / originalHeight
+      // Transformer le déplacement dans le système global pour la position
       newLeft = initialScale.left + deltaX
       newTop = initialScale.top + deltaY
     } else if (handleInfo.corner === 'tr') {
       // Coin haut-droite : scale depuis le coin bas-gauche
-      newScaleX = (initialWidth + deltaX) / originalWidth
-      newScaleY = (initialHeight - deltaY) / originalHeight
+      newScaleX = (initialWidth + localDeltaX) / originalWidth
+      newScaleY = (initialHeight - localDeltaY) / originalHeight
+      // Transformer le déplacement dans le système global pour la position
       newTop = initialScale.top + deltaY
     } else if (handleInfo.corner === 'bl') {
       // Coin bas-gauche : scale depuis le coin haut-droite
-      newScaleX = (initialWidth - deltaX) / originalWidth
-      newScaleY = (initialHeight + deltaY) / originalHeight
+      newScaleX = (initialWidth - localDeltaX) / originalWidth
+      newScaleY = (initialHeight + localDeltaY) / originalHeight
+      // Transformer le déplacement dans le système global pour la position
       newLeft = initialScale.left + deltaX
     }
   } else {
     // Redimensionnement par bord (scale dans une direction)
     if (handleInfo.edge === 'right') {
-      newScaleX = (initialWidth + deltaX) / originalWidth
+      newScaleX = (initialWidth + localDeltaX) / originalWidth
       // Garder la position et le scale Y inchangés
     } else if (handleInfo.edge === 'left') {
-      newScaleX = (initialWidth - deltaX) / originalWidth
+      newScaleX = (initialWidth - localDeltaX) / originalWidth
+      // Transformer le déplacement dans le système global pour la position
       newLeft = initialScale.left + deltaX
     } else if (handleInfo.edge === 'bottom') {
-      newScaleY = (initialHeight + deltaY) / originalHeight
+      newScaleY = (initialHeight + localDeltaY) / originalHeight
       // Garder la position et le scale X inchangés
     } else if (handleInfo.edge === 'top') {
-      newScaleY = (initialHeight - deltaY) / originalHeight
+      newScaleY = (initialHeight - localDeltaY) / originalHeight
+      // Transformer le déplacement dans le système global pour la position
       newTop = initialScale.top + deltaY
     }
   }
@@ -3071,6 +3676,59 @@ const scaleSelectedObject = async (scaleFactor) => {
   emit('design-updated', canvas)
 }
 
+/**
+ * Active le mode rotation pour un objet en simulant un clic sur le contrôle mtr
+ * @param {fabric.Object} obj - L'objet à faire tourner
+ * @param {Object} mtrCoords - Coordonnées du contrôle de rotation {x, y}
+ */
+const activateRotationMode = (obj, mtrCoords) => {
+  if (!canvas || !obj) return
+  
+  // S'assurer que l'objet est sélectionné
+  if (canvas.getActiveObject() !== obj) {
+    canvas.setActiveObject(obj)
+    canvas.renderAll()
+  }
+  
+  // S'assurer que les coordonnées sont à jour
+  if (obj.setCoords) {
+    obj.setCoords()
+  }
+  
+  // Obtenir l'élément canvas HTML
+  const canvasElement = canvas.getElement()
+  if (!canvasElement || !mtrCoords) return
+  
+  // Calculer la position relative du contrôle mtr dans le canvas
+  const canvasOffset = canvasElement.getBoundingClientRect()
+  
+  // Simuler un événement mousedown sur le contrôle mtr
+  // Fabric.js utilise les coordonnées de la page pour détecter les contrôles
+  const mouseEvent = new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    clientX: canvasOffset.left + mtrCoords.x,
+    clientY: canvasOffset.top + mtrCoords.y,
+    button: 0
+  })
+  
+  // Déclencher l'événement sur le canvas
+  canvasElement.dispatchEvent(mouseEvent)
+  
+  // Optionnel : simuler aussi un mousemove pour commencer la rotation
+  // Cela permet à l'utilisateur de commencer à faire tourner immédiatement
+  setTimeout(() => {
+    const moveEvent = new MouseEvent('mousemove', {
+      bubbles: true,
+      cancelable: true,
+      clientX: canvasOffset.left + mtrCoords.x + 10,
+      clientY: canvasOffset.top + mtrCoords.y,
+      button: 0
+    })
+    canvasElement.dispatchEvent(moveEvent)
+  }, 10)
+}
+
 // Expose methods
 defineExpose({
   getCanvas: () => canvas,
@@ -3093,7 +3751,8 @@ defineExpose({
   deleteSelected,
   deselectObject,
   addGreenBand,
-  addSeamLine
+  addSeamLine,
+  activateRotationMode
 })
 </script>
 
@@ -3219,6 +3878,238 @@ defineExpose({
   visibility: visible !important;
   opacity: 1 !important;
   flex-shrink: 0;
+}
+
+/* Style pour la div de débogage des contrôles 2D */
+.debug-control-2d {
+  position: absolute;
+  height: 200px;
+  top: 150px;
+  right: 20px;
+  background: rgba(34, 197, 94, 0.9);
+  border: 2px solid #22c55e;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 250px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.debug-control-2d .coord-title {
+  color: #fff;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.debug-control-2d .coord-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debug-control-2d .coord-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.debug-control-2d .coord-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.debug-control-2d .coord-value {
+  font-weight: 500;
+  color: #fff;
+}
+
+/* Style pour la div des coordonnées du curseur 2D */
+.cursor-coords-2d {
+  position: absolute;
+  top: 100px;
+  right: 20px;
+  background: rgba(59, 130, 246, 0.9);
+  border: 2px solid #3b82f6;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 150px;
+  max-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.cursor-coords-2d .coord-title {
+  color: #fff;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.cursor-coords-2d .coord-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cursor-coords-2d .coord-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.cursor-coords-2d .coord-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.cursor-coords-2d .coord-value {
+  font-weight: 500;
+  color: #fff;
+}
+
+/* Style pour la liste des objets 2D */
+.objects-list-2d {
+  position: fixed;
+  top: 130px;
+  left: 717px;
+  background: rgba(34, 197, 94, 0.95);
+  border: 2px solid #22c55e;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 350px;
+  max-height: 500px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+}
+
+.objects-list-2d .coord-title {
+  color: #fff;
+  font-weight: bold;
+  margin-bottom: 8px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  padding-bottom: 6px;
+}
+
+.objects-list-2d .objects-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-right: 4px;
+}
+
+.objects-list-2d .objects-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.objects-list-2d .objects-scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.objects-list-2d .objects-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.objects-list-2d .objects-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.objects-list-2d .object-item {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s;
+}
+
+.objects-list-2d .object-item.selected {
+  background: rgba(255, 255, 255, 0.25);
+  border-left-color: #fff;
+}
+
+.objects-list-2d .object-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.objects-list-2d .object-type {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.objects-list-2d .selected-badge {
+  background: #fff;
+  color: #22c55e;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.objects-list-2d .object-details {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.objects-list-2d .object-detail-row {
+  margin: 2px 0;
+}
+
+.objects-list-2d .object-detail-row span {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.objects-list-2d .controls-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.objects-list-2d .controls-title {
+  font-weight: 600;
+  font-size: 10px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.objects-list-2d .control-item {
+  font-size: 10px;
+  margin: 2px 0;
+  opacity: 0.85;
+}
+
+.objects-list-2d .control-item span {
+  font-weight: 600;
+  margin-right: 4px;
 }
 </style>
 

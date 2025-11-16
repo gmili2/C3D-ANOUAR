@@ -24,7 +24,7 @@
     />
     <!-- Affichage des coordonnées en temps réel -->
     <div v-if="coordinatesDisplay.show" 
-         :class="['coordinates-display', { 'on-seam': isOnSeam }]">
+         :class="['coordinates-display', { 'on-seam': isOnSeam, 'on-rotation': coordinatesDisplay.isOnRotationHandle }]">
       <div class="coord-title">📍 Coordonnées Curseur</div>
       <div class="coord-section">
         <div class="coord-label">3D (UV):</div>
@@ -87,6 +87,9 @@
           <div class="coord-label">Opacité:</div>
           <div class="coord-value">{{ (selectedObjectCoords.opacity !== undefined ? selectedObjectCoords.opacity : 1.0).toFixed(2) }}</div>
         </div>
+        <div v-if="isNearRotationHandle" class="coord-section rotation-active-indicator">
+          <div class="coord-label">🔄 Rotation Active</div>
+        </div>
       </div>
     </div>
     
@@ -115,6 +118,36 @@
             </div>
             <div class="object-detail-row">
               <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
+            </div>
+            <div v-if="obj.controls" class="controls-section">
+              <div class="controls-title">Contrôles:</div>
+              <div v-if="obj.controls.tl" class="control-item">
+                <span>tl:</span> ({{ obj.controls.tl.x.toFixed(1) }}, {{ obj.controls.tl.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.tr" class="control-item">
+                <span>tr:</span> ({{ obj.controls.tr.x.toFixed(1) }}, {{ obj.controls.tr.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.bl" class="control-item">
+                <span>bl:</span> ({{ obj.controls.bl.x.toFixed(1) }}, {{ obj.controls.bl.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.br" class="control-item">
+                <span>br:</span> ({{ obj.controls.br.x.toFixed(1) }}, {{ obj.controls.br.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mt" class="control-item">
+                <span>mt:</span> ({{ obj.controls.mt.x.toFixed(1) }}, {{ obj.controls.mt.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mb" class="control-item">
+                <span>mb:</span> ({{ obj.controls.mb.x.toFixed(1) }}, {{ obj.controls.mb.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.ml" class="control-item">
+                <span>ml:</span> ({{ obj.controls.ml.x.toFixed(1) }}, {{ obj.controls.ml.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mr" class="control-item">
+                <span>mr:</span> ({{ obj.controls.mr.x.toFixed(1) }}, {{ obj.controls.mr.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mtr" class="control-item">
+                <span>mtr:</span> ({{ obj.controls.mtr.x.toFixed(1) }}, {{ obj.controls.mtr.y.toFixed(1) }})
+              </div>
             </div>
           </div>
         </div>
@@ -148,6 +181,40 @@
       </div>
     </div> -->
     
+    <!-- Div de débogage pour les contrôles détectés -->
+    <div v-if="detectedControl.show" class="coordinates-display debug-control">
+      <div class="coord-title">🔧 Contrôle Détecté</div>
+      <div class="coord-content">
+        <div class="coord-section">
+          <div class="coord-label">Handle:</div>
+          <div class="coord-value">{{ detectedControl.handle || 'Aucun' }}</div>
+        </div>
+        <div v-if="detectedControl.corner" class="coord-section">
+          <div class="coord-label">Coin:</div>
+          <div class="coord-value">{{ detectedControl.corner }}</div>
+        </div>
+        <div v-if="detectedControl.edge" class="coord-section">
+          <div class="coord-label">Bord:</div>
+          <div class="coord-value">{{ detectedControl.edge }}</div>
+        </div>
+        <div v-if="detectedControl.isRotation" class="coord-section">
+          <div class="coord-label">Type:</div>
+          <div class="coord-value">Rotation (mtr)</div>
+        </div>
+        <div v-if="detectedControl.distance !== null" class="coord-section">
+          <div class="coord-label">Distance:</div>
+          <div class="coord-value">{{ detectedControl.distance.toFixed(1) }}px</div>
+        </div>
+        <div v-if="detectedControl.x !== null && detectedControl.y !== null" class="coord-section">
+          <div class="coord-label">Coordonnées:</div>
+          <div class="coord-value">
+            X: {{ detectedControl.x.toFixed(1) }}, 
+            Y: {{ detectedControl.y.toFixed(1) }}
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <!-- Liste des éléments du canvas -->
     <div v-if="allObjectsList.length > 0" class="coordinates-display meshes-list">
       <div class="coord-title">📦 Éléments du Canvas ({{ allObjectsList.length }})</div>
@@ -177,6 +244,36 @@
             </div>
             <div class="mesh-detail-row">
               <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
+            </div>
+            <div v-if="obj.controls" class="controls-section">
+              <div class="controls-title">Contrôles:</div>
+              <div v-if="obj.controls.tl" class="control-item">
+                <span>tl:</span> ({{ obj.controls.tl.x.toFixed(1) }}, {{ obj.controls.tl.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.tr" class="control-item">
+                <span>tr:</span> ({{ obj.controls.tr.x.toFixed(1) }}, {{ obj.controls.tr.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.bl" class="control-item">
+                <span>bl:</span> ({{ obj.controls.bl.x.toFixed(1) }}, {{ obj.controls.bl.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.br" class="control-item">
+                <span>br:</span> ({{ obj.controls.br.x.toFixed(1) }}, {{ obj.controls.br.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mt" class="control-item">
+                <span>mt:</span> ({{ obj.controls.mt.x.toFixed(1) }}, {{ obj.controls.mt.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mb" class="control-item">
+                <span>mb:</span> ({{ obj.controls.mb.x.toFixed(1) }}, {{ obj.controls.mb.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.ml" class="control-item">
+                <span>ml:</span> ({{ obj.controls.ml.x.toFixed(1) }}, {{ obj.controls.ml.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mr" class="control-item">
+                <span>mr:</span> ({{ obj.controls.mr.x.toFixed(1) }}, {{ obj.controls.mr.y.toFixed(1) }})
+              </div>
+              <div v-if="obj.controls.mtr" class="control-item">
+                <span>mtr:</span> ({{ obj.controls.mtr.x.toFixed(1) }}, {{ obj.controls.mtr.y.toFixed(1) }})
+              </div>
             </div>
           </div>
         </div>
@@ -263,7 +360,11 @@ const emit = defineEmits([
   '3d-resize-start',   // Début du redimensionnement par bord
   '3d-resize',         // Redimensionnement en cours par bord
   '3d-resize-end',     // Fin du redimensionnement par bord
-  '3d-hover'           // Survol du modèle 3D (pour détecter les bords)
+  '3d-hover',          // Survol du modèle 3D (pour détecter les bords)
+  '3d-rotation-click',  // Clic sur le contrôle de rotation (mtr) dans la vue 3D
+  '3d-rotation-start',  // Début de la rotation depuis le mtr
+  '3d-rotation',        // Rotation en cours depuis le mtr
+  '3d-rotation-end'      // Fin de la rotation depuis le mtr
 ])
 
 // ============================================================================
@@ -304,7 +405,8 @@ const coordinatesDisplay = ref({
   canvasX: 0,
   canvasY: 0,
   worldPos: null,
-  isOnSeam: false // Flag pour indiquer si le curseur est sur la couture
+  isOnSeam: false, // Flag pour indiquer si le curseur est sur la couture
+  isOnRotationHandle: false // Flag pour indiquer si le curseur est sur le contrôle de rotation
 })
 
 // Computed pour vérifier si on est sur la couture
@@ -323,8 +425,28 @@ const selectedObjectCoords = ref({
   scaleX: 1,
   scaleY: 1,
   angle: 0,
-  opacity: 1.0
+  opacity: 1.0,
+  controls: {} // Coordonnées des contrôles, notamment mtr
 })
+
+// État pour indiquer si on est proche du contrôle de rotation
+const isNearRotationHandle = ref(false)
+
+// État pour le débogage des contrôles détectés
+const detectedControl = ref({
+  show: false,
+  handle: null,
+  corner: null,
+  edge: null,
+  isRotation: false,
+  distance: null,
+  x: null,
+  y: null
+})
+
+// Gardes pour éviter les mises à jour récursives
+let isUpdatingSelectedObject = false
+let isUpdatingObjectsList = false
 
 // ----- Liste de Tous les Objets -----
 const allObjectsList = ref([])
@@ -597,6 +719,40 @@ let lastDragPosition = null   // Dernière position du glissement
 let isResizing3D = false      // Flag pour indiquer si on est en mode redimensionnement
 let resizeStartPosition = null // Position de départ du redimensionnement
 let resizeHandleInfo = null    // Informations sur le handle utilisé pour le redimensionnement
+let isRotating3D = false      // Flag pour indiquer si on est en mode rotation depuis le mtr
+let rotationStartPosition = null // Position de départ pour la rotation (coordonnées du mtr)
+let rotationStartCursor = null   // Position du curseur au début de la rotation
+let rotationStartAngle = null    // Angle initial de l'objet au début de la rotation
+let rotationJustEnded = false    // Flag pour éviter de détecter la rotation juste après l'avoir terminée
+let rotationEndTime = 0          // Timestamp de la fin de la rotation
+
+/**
+ * Réinitialise l'état de rotation
+ * Utile lors du switch entre les vues 2D et 3D
+ */
+const resetRotationState = () => {
+  if (isRotating3D) {
+    // Émettre l'événement de fin de rotation si on était en train de rotater
+    emit('3d-rotation-end')
+  }
+  isRotating3D = false
+  rotationStartPosition = null
+  rotationStartCursor = null
+  rotationStartAngle = null
+  rotationJustEnded = false
+  rotationEndTime = 0
+  
+  // Remettre le curseur normal
+  if (renderer && renderer.domElement) {
+    const defaultCursor = props.dragMode ? 'move' : 'default'
+    renderer.domElement.style.setProperty('cursor', defaultCursor, 'important')
+  }
+  
+  // Réactiver les contrôles OrbitControls
+  if (controls) {
+    controls.enabled = true
+  }
+}
 
 /**
  * Configure les handlers pour les interactions (clic, drag, molette)
@@ -660,6 +816,99 @@ const setupClickHandler = () => {
     
     const canvasCoords = getCanvasCoords(event)
     if (canvasCoords !== null) {
+      // Si on est déjà en mode rotation, vérifier si on clique toujours sur le mtr
+      if (isRotating3D) {
+        // Si on clique ailleurs que sur le mtr, désactiver la rotation
+        if (selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
+          const mtrX = selectedObjectCoords.value.controls.mtr.x
+          const mtrY = selectedObjectCoords.value.controls.mtr.y
+          const cursorX = canvasCoords.x
+          const cursorY = canvasCoords.y
+          
+          const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
+          const clickThreshold = 25
+          
+          // Si on clique ailleurs que sur le mtr, désactiver la rotation
+          if (distance > clickThreshold) {
+            emit('3d-rotation-end')
+            isRotating3D = false
+            rotationStartPosition = null
+            rotationStartCursor = null
+            
+            // Réactiver les contrôles OrbitControls
+            if (controls) {
+              controls.enabled = true
+            }
+          }
+        } else {
+          // Si l'objet n'est plus sélectionné, désactiver la rotation
+          emit('3d-rotation-end')
+          isRotating3D = false
+          rotationStartPosition = null
+          rotationStartCursor = null
+          
+          // Réactiver les contrôles OrbitControls
+          if (controls) {
+            controls.enabled = true
+          }
+        }
+      }
+      
+      // Vérifier si on clique sur le contrôle de rotation (mtr) de l'élément sélectionné
+      // Mais seulement si on n'a pas juste terminé une rotation (pour éviter les conflits)
+      const timeSinceRotationEnd = Date.now() - rotationEndTime
+      const minTimeBetweenRotationAndDrag = 100 // 100ms minimum entre la fin de rotation et un nouveau clic
+      
+      if (!rotationJustEnded && timeSinceRotationEnd > minTimeBetweenRotationAndDrag && 
+          selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
+        const mtrX = selectedObjectCoords.value.controls.mtr.x
+        const mtrY = selectedObjectCoords.value.controls.mtr.y
+        const cursorX = canvasCoords.x
+        const cursorY = canvasCoords.y
+        
+        // Calculer la distance entre le clic et le mtr
+        const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
+        
+        // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
+        const clickThreshold = 25
+        
+        if (distance <= clickThreshold) {
+          // Activer le mode rotation
+          isRotating3D = true
+          rotationJustEnded = false
+          rotationStartPosition = { x: mtrX, y: mtrY }
+          rotationStartCursor = { x: cursorX, y: cursorY }
+          
+          // Empêcher les contrôles OrbitControls pendant l'interaction
+          if (controls) {
+            controls.enabled = false
+          }
+          
+          // Émettre un événement pour informer que la rotation commence
+          emit('3d-rotation-start', {
+            canvasX: canvasCoords.x,
+            canvasY: canvasCoords.y,
+            mtrCoords: selectedObjectCoords.value.controls.mtr
+          })
+          
+          return // Ne pas continuer avec le drag normal
+        }
+      }
+      
+      // Si on clique ailleurs que sur le mtr, désactiver la rotation si elle était active
+      // (cela couvre le cas où on clique sur un autre point de la surface ou en dehors de l'objet)
+      if (isRotating3D) {
+        emit('3d-rotation-end')
+        isRotating3D = false
+        rotationStartPosition = null
+        rotationStartCursor = null
+        
+        // Réactiver les contrôles OrbitControls
+        if (controls) {
+          controls.enabled = true
+        }
+      }
+      
       // Émettre l'événement pour que le parent détermine si c'est un resize ou un drag
       // On ne met pas isDragging3D à true tout de suite, on attend la réponse du parent
       emit('3d-drag-start', {
@@ -712,11 +961,37 @@ const setupClickHandler = () => {
           canvasX: canvasCoords.x,
           canvasY: canvasCoords.y,
           isOnSeam: isOnSeamValue, // Flag pour indiquer si on est sur la couture
+          isOnRotationHandle: coordinatesDisplay.value.isOnRotationHandle || false, // Conserver l'état du contrôle de rotation
           worldPos: {
             x: intersection.point.x,
             y: intersection.point.y,
             z: intersection.point.z
           }
+        }
+        
+        // Comparer les coordonnées du curseur avec le contrôle de rotation (mtr) de l'élément sélectionné
+        if (selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
+          const mtrX = selectedObjectCoords.value.controls.mtr.x
+          const mtrY = selectedObjectCoords.value.controls.mtr.y
+          const cursorX = canvasCoords.x
+          const cursorY = canvasCoords.y
+          
+          // Calculer la distance entre le curseur et le mtr
+          const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
+          
+          // Seuil de proximité (en pixels)
+          const proximityThreshold = 20
+          
+          if (distance <= proximityThreshold) {
+            if (!isNearRotationHandle.value) {
+              // Afficher l'alerte seulement la première fois qu'on entre dans la zone
+              isNearRotationHandle.value = true
+            }
+          } else {
+            isNearRotationHandle.value = false
+          }
+        } else {
+          isNearRotationHandle.value = false
         }
         
         // Log périodique pour déboguer (seulement toutes les 30 frames pour ne pas surcharger)
@@ -746,6 +1021,39 @@ const setupClickHandler = () => {
       return
     }
     
+    // Si on est en train de faire tourner depuis le mtr
+    if (isRotating3D && canvasCoords !== null && rotationStartPosition && rotationStartCursor && selectedObjectCoords.value.show) {
+      // Calculer l'angle de rotation basé sur le mouvement du curseur
+      // Utiliser le centre de l'objet comme point de référence pour la rotation
+      const centerX = selectedObjectCoords.value.left + selectedObjectCoords.value.width / 2
+      const centerY = selectedObjectCoords.value.top + selectedObjectCoords.value.height / 2
+      
+      // Calculer les angles relatifs au centre de l'objet
+      const startDx = rotationStartCursor.x - centerX
+      const startDy = rotationStartCursor.y - centerY
+      const currentDx = canvasCoords.x - centerX
+      const currentDy = canvasCoords.y - centerY
+      
+      // Calculer l'angle initial et l'angle actuel (en degrés)
+      const startAngle = Math.atan2(startDy, startDx) * (180 / Math.PI)
+      const currentAngle = Math.atan2(currentDy, currentDx) * (180 / Math.PI)
+      
+      // Calculer la différence d'angle
+      let angleDelta = currentAngle - startAngle
+      
+      // Normaliser l'angle entre -180 et 180
+      if (angleDelta > 180) angleDelta -= 360
+      if (angleDelta < -180) angleDelta += 360
+      
+      // Émettre l'événement de rotation avec l'angle calculé
+      emit('3d-rotation', {
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y,
+        angle: angleDelta,
+        mtrCoords: rotationStartPosition
+      })
+    }
+    
     // Si on est en train de cliquer/maintenir (isDragging3D ou isResizing3D)
     if (isDragging3D || isResizing3D) {
       if (canvasCoords !== null) {
@@ -771,6 +1079,31 @@ const setupClickHandler = () => {
   }
   
   const onMouseUp = (event) => {
+    if (isRotating3D) {
+      emit('3d-rotation-end')
+      isRotating3D = false
+      rotationStartPosition = null
+      rotationStartCursor = null
+      rotationJustEnded = true
+      rotationEndTime = Date.now()
+      
+      // Remettre le curseur normal
+      if (renderer && renderer.domElement) {
+        const defaultCursor = props.dragMode ? 'move' : 'default'
+        renderer.domElement.style.setProperty('cursor', defaultCursor, 'important')
+      }
+      
+      // Réactiver les contrôles OrbitControls
+      if (controls) {
+        controls.enabled = true
+      }
+      
+      // Réinitialiser le flag après un délai
+      setTimeout(() => {
+        rotationJustEnded = false
+      }, 200)
+    }
+    
     if (isDragging3D || isResizing3D) {
       if (isResizing3D) {
         emit('3d-resize-end')
@@ -802,7 +1135,7 @@ const setupClickHandler = () => {
   const onCanvasClick = (event) => {
     // Si on est en train de glisser activement, ne pas gérer les clics simples
     // (pour éviter de sélectionner pendant un drag)
-    if (isDragging3D || isResizing3D) return
+    if (isDragging3D || isResizing3D || isRotating3D) return
     
     if (!currentMesh || !props.canvas2D || !raycaster3D) return
     
@@ -853,8 +1186,36 @@ const setupClickHandler = () => {
         }
         
         if (canvasCoords !== null) {
+          // Vérifier si on clique sur le contrôle de rotation (mtr) de l'élément sélectionné
+          let isRotationClick = false
+          if (selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
+            const mtrX = selectedObjectCoords.value.controls.mtr.x
+            const mtrY = selectedObjectCoords.value.controls.mtr.y
+            const cursorX = canvasCoords.x
+            const cursorY = canvasCoords.y
+            
+            // Calculer la distance entre le clic et le mtr
+            const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
+            
+            // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
+            const clickThreshold = 25
+            
+            if (distance <= clickThreshold) {
+              isRotationClick = true
+              // Émettre un événement spécial pour activer la rotation
+              emit('3d-rotation-click', {
+                intersection,
+                canvasX: canvasCoords.x,
+                canvasY: canvasCoords.y,
+                uv: intersection.uv,
+                mesh: clickedMesh,
+                mtrCoords: selectedObjectCoords.value.controls.mtr
+              })
+            }
+          }
+          
           // Si on est en mode placement, émettre l'événement pour placer l'élément
-          if (props.placementMode && props.placementType) {
+          if (!isRotationClick && props.placementMode && props.placementType) {
             emit('3d-click', {
               intersection,
               canvasX: canvasCoords.x,
@@ -863,7 +1224,7 @@ const setupClickHandler = () => {
               mesh: clickedMesh,
               placementType: props.placementType
             })
-          } else {
+          } else if (!isRotationClick) {
             // Sinon, comportement normal (peut être utilisé pour d'autres fonctionnalités)
             emit('3d-click', {
               intersection,
@@ -2054,26 +2415,49 @@ const setDragState = (dragging) => {
  * @param {fabric.Object|null} obj - L'objet sélectionné ou null
  */
 const updateSelectedObjectCoords = (obj) => {
-  if (!obj) {
-    selectedObjectCoords.value.show = false
+  // Éviter les mises à jour récursives
+  if (isUpdatingSelectedObject) {
     return
   }
   
-  // Calculer les dimensions réelles avec le scale
-  const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-  const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+  if (!obj) {
+    isUpdatingSelectedObject = true
+    selectedObjectCoords.value.show = false
+    isNearRotationHandle.value = false
+    isUpdatingSelectedObject = false
+    return
+  }
   
-  selectedObjectCoords.value = {
-    show: true,
-    type: obj.type || 'unknown',
-    left: obj.left || 0,
-    top: obj.top || 0,
-    width: objWidth,
-    height: objHeight,
-    scaleX: obj.scaleX || 1,
-    scaleY: obj.scaleY || 1,
-    angle: obj.angle || 0,
-    opacity: obj.opacity !== undefined ? obj.opacity : 1.0
+  isUpdatingSelectedObject = true
+  
+  try {
+    // Calculer les dimensions réelles avec le scale
+    const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+    const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+    
+    // Calculer les coordonnées des contrôles
+    // Utiliser skipSetCoords = true pour éviter les boucles récursives
+    // calcCoords() recalcule les coordonnées à partir de l'état actuel sans déclencher d'événements
+    const controls = calculateControlCoordinates(obj, true)
+    
+    selectedObjectCoords.value = {
+      show: true,
+      type: obj.type || 'unknown',
+      left: obj.left || 0,
+      top: obj.top || 0,
+      width: objWidth,
+      height: objHeight,
+      scaleX: obj.scaleX || 1,
+      scaleY: obj.scaleY || 1,
+      angle: obj.angle || 0,
+      opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
+      controls: controls
+    }
+  } finally {
+    // Utiliser nextTick pour s'assurer que la mise à jour est terminée avant de réinitialiser le garde
+    nextTick(() => {
+      isUpdatingSelectedObject = false
+    })
   }
 }
 
@@ -2094,41 +2478,168 @@ const updateAllObjectsList = () => {
 }
 
 /**
+ * Calcule les coordonnées de tous les contrôles pour un objet Fabric.js
+ * @param {fabric.Object} obj - L'objet Fabric.js
+ * @param {boolean} skipSetCoords - Si true, ne pas appeler setCoords() pour éviter les boucles récursives
+ * @returns {Object} - Objet contenant les coordonnées de tous les contrôles
+ */
+const calculateControlCoordinates = (obj, skipSetCoords = false) => {
+  if (!obj) return {}
+  
+  // Toujours recalculer les coordonnées pour avoir les valeurs à jour (notamment après rotation)
+  let coords = null
+  try {
+    // Même si skipSetCoords est true, on doit s'assurer que les coordonnées sont à jour
+    // calcCoords() recalcule à partir de l'état actuel (angle, scale, position) sans déclencher d'événements
+    // C'est la méthode recommandée pour obtenir des coordonnées à jour sans risque de boucle récursive
+    coords = obj.calcCoords ? obj.calcCoords() : null
+    
+    // Si calcCoords() n'est pas disponible ou retourne null, utiliser oCoords
+    // Mais seulement si skipSetCoords est false, sinon on risque une boucle récursive
+    if (!coords || !coords.tl) {
+      if (!skipSetCoords && obj.setCoords) {
+        obj.setCoords()
+        coords = obj.oCoords || (obj.calcCoords ? obj.calcCoords() : null)
+      } else if (obj.oCoords) {
+        coords = obj.oCoords
+      }
+    }
+  } catch (e) {
+    console.warn('Erreur lors de calcCoords:', e)
+    // Si calcCoords échoue, essayer oCoords
+    coords = obj.oCoords || null
+  }
+  
+  if (!coords || !coords.tl) return {}
+  
+  const controls = {}
+  
+  // Coins
+  if (coords.tl) {
+    controls.tl = { x: coords.tl.x, y: coords.tl.y }
+  }
+  if (coords.tr) {
+    controls.tr = { x: coords.tr.x, y: coords.tr.y }
+  }
+  if (coords.bl) {
+    controls.bl = { x: coords.bl.x, y: coords.bl.y }
+  }
+  if (coords.br) {
+    controls.br = { x: coords.br.x, y: coords.br.y }
+  }
+  
+  // Bords
+  if (coords.tl && coords.tr) {
+    controls.mt = { 
+      x: (coords.tl.x + coords.tr.x) / 2, 
+      y: (coords.tl.y + coords.tr.y) / 2 
+    }
+  }
+  if (coords.bl && coords.br) {
+    controls.mb = { 
+      x: (coords.bl.x + coords.br.x) / 2, 
+      y: (coords.bl.y + coords.br.y) / 2 
+    }
+  }
+  if (coords.tl && coords.bl) {
+    controls.ml = { 
+      x: (coords.tl.x + coords.bl.x) / 2, 
+      y: (coords.tl.y + coords.bl.y) / 2 
+    }
+  }
+  if (coords.tr && coords.br) {
+    controls.mr = { 
+      x: (coords.tr.x + coords.br.x) / 2, 
+      y: (coords.tr.y + coords.br.y) / 2 
+    }
+  }
+  
+  // Contrôle de rotation (mtr)
+  if (coords.tl && coords.tr) {
+    const centerTopX = (coords.tl.x + coords.tr.x) / 2
+    const centerTopY = (coords.tl.y + coords.tr.y) / 2
+    const dx = coords.tr.x - coords.tl.x
+    const dy = coords.tr.y - coords.tl.y
+    const length = Math.sqrt(dx * dx + dy * dy)
+    
+    if (Math.abs(dy) < 0.01) {
+      // Rectangle non roté
+      controls.mtr = { 
+        x: centerTopX, 
+        y: centerTopY - 30 
+      }
+    } else {
+      // Rectangle roté : utiliser (dy, -dx) pour pointer vers le haut
+      // Cela garantit que mtr est toujours au-dessus du bord (côté opposé à bl)
+      const offset = 30
+      controls.mtr = { 
+        x: centerTopX + (dy / length) * offset, 
+        y: centerTopY - (dx / length) * offset 
+      }
+    }
+  }
+  
+  return controls
+}
+
+/**
  * Met à jour la liste de tous les objets depuis le canvas Fabric.js
  * Cette fonction sera appelée depuis DesignStudio
  */
 const updateObjectsListFromCanvas = (objects) => {
-  if (!objects || !Array.isArray(objects)) {
-    allObjectsList.value = []
+  // Éviter les mises à jour récursives
+  if (isUpdatingObjectsList) {
     return
   }
   
-  // Identifier l'objet sélectionné pour le marquer
-  const selectedObj = props.selectedObject
-  
-  allObjectsList.value = objects
-    .filter(obj => !obj.userData?.isWorkZoneIndicator)
-    .map((obj, index) => {
-      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-      
-      // Vérifier si cet objet est sélectionné
-      const isSelected = selectedObj && (
-        (obj.id && selectedObj.id && obj.id === selectedObj.id) ||
-        obj === selectedObj
-      )
-      
-      return {
-        id: obj.id || `obj-${index}`,
-        type: obj.type || 'unknown',
-        left: obj.left || 0,
-        top: obj.top || 0,
-        width: objWidth,
-        height: objHeight,
-        opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
-        isSelected: isSelected
-      }
+  if (!objects || !Array.isArray(objects)) {
+    isUpdatingObjectsList = true
+    allObjectsList.value = []
+    nextTick(() => {
+      isUpdatingObjectsList = false
     })
+    return
+  }
+  
+  isUpdatingObjectsList = true
+  
+  try {
+    // Identifier l'objet sélectionné pour le marquer
+    const selectedObj = props.selectedObject
+    
+    allObjectsList.value = objects
+      .filter(obj => !obj.userData?.isWorkZoneIndicator)
+      .map((obj, index) => {
+        const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
+        const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
+        
+        // Vérifier si cet objet est sélectionné
+        const isSelected = selectedObj && (
+          (obj.id && selectedObj.id && obj.id === selectedObj.id) ||
+          obj === selectedObj
+        )
+        
+        // Calculer les coordonnées des contrôles (skipSetCoords = true pour éviter les boucles récursives)
+        const controls = calculateControlCoordinates(obj, true)
+        
+        return {
+          id: obj.id || `obj-${index}`,
+          type: obj.type || 'unknown',
+          left: obj.left || 0,
+          top: obj.top || 0,
+          width: objWidth,
+          height: objHeight,
+          opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
+          isSelected: isSelected,
+          controls: controls
+        }
+      })
+  } finally {
+    // Utiliser nextTick pour s'assurer que la mise à jour est terminée avant de réinitialiser le garde
+    nextTick(() => {
+      isUpdatingObjectsList = false
+    })
+  }
 }
 
 // Expose methods for parent component
@@ -2170,6 +2681,48 @@ const scaleModel = (scaleFactor = 0.8) => {
   }
 }
 
+/**
+ * Définit si le curseur survole le contrôle de rotation
+ * @param {boolean} isHovering - true si on survole le contrôle de rotation
+ */
+const setRotationHandleHover = (isHovering) => {
+  coordinatesDisplay.value.isOnRotationHandle = isHovering
+}
+
+/**
+ * Met à jour l'état de débogage pour afficher le contrôle détecté
+ * @param {Object|null} handleInfo - Informations sur le contrôle détecté ou null
+ * @param {number|null} distance - Distance au contrôle (optionnel)
+ * @param {number|null} x - Coordonnée X du contrôle (optionnel)
+ * @param {number|null} y - Coordonnée Y du contrôle (optionnel)
+ */
+const setDetectedControl = (handleInfo, distance = null, x = null, y = null) => {
+  if (!handleInfo) {
+    detectedControl.value = {
+      show: false,
+      handle: null,
+      corner: null,
+      edge: null,
+      isRotation: false,
+      distance: null,
+      x: null,
+      y: null
+    }
+    return
+  }
+  
+  detectedControl.value = {
+    show: true,
+    handle: handleInfo.handle || null,
+    corner: handleInfo.corner || null,
+    edge: handleInfo.edge || null,
+    isRotation: handleInfo.isRotation || false,
+    distance: distance,
+    x: x,
+    y: y
+  }
+}
+
 defineExpose({
   getCurrentMesh: () => currentMesh,
   applyTexture,
@@ -2193,6 +2746,9 @@ defineExpose({
   createSeamlessGoblet,
   rotateModel,
   scaleModel,
+  setRotationHandleHover,
+  setDetectedControl,
+  resetRotationState,
   renderer,
   emit
 })
@@ -2237,6 +2793,20 @@ defineExpose({
 }
 
 .coordinates-display.on-seam .coord-title {
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+/* Style quand le curseur est sur le contrôle de rotation */
+.coordinates-display.on-rotation {
+  background: rgba(255, 165, 0, 0.9) !important; /* Fond orange */
+  border: 2px solid #ff8c00; /* Bordure orange foncé */
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(255, 165, 0, 0.5); /* Ombre orange */
+}
+
+.coordinates-display.on-rotation .coord-title {
   color: #fff;
   font-weight: bold;
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
@@ -2374,6 +2944,30 @@ defineExpose({
   margin-right: 4px;
 }
 
+.controls-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.controls-title {
+  font-weight: 600;
+  font-size: 10px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.control-item {
+  font-size: 10px;
+  margin: 2px 0;
+  opacity: 0.85;
+}
+
+.control-item span {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
 .coord-title {
   font-weight: bold;
   margin-bottom: 8px;
@@ -2403,6 +2997,28 @@ defineExpose({
 
 .selected-object-coords .coord-label {
   color: rgba(255, 255, 255, 0.7);
+}
+
+.rotation-active-indicator {
+  background: rgba(255, 165, 0, 0.3) !important;
+  border: 1px solid rgba(255, 165, 0, 0.6);
+  border-radius: 4px;
+  padding: 4px 8px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.rotation-active-indicator .coord-label {
+  color: #ff8c00 !important;
+  font-weight: bold;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .coord-value {
@@ -2558,6 +3174,79 @@ defineExpose({
 .mesh-detail-row span {
   font-weight: 600;
   margin-right: 4px;
+}
+
+.mesh-details .controls-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.mesh-details .controls-title {
+  font-weight: 600;
+  font-size: 10px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.mesh-details .control-item {
+  font-size: 10px;
+  margin: 2px 0;
+  opacity: 0.85;
+}
+
+.mesh-details .control-item span {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* Style pour la div de débogage des contrôles */
+.debug-control {
+  position: absolute;
+  height: 200px;
+  top: 150px;
+  right: 20px;
+  background: rgba(139, 92, 246, 0.9);
+  border: 2px solid #8b5cf6;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 250px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.debug-control .coord-title {
+  color: #fff;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.debug-control .coord-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debug-control .coord-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.debug-control .coord-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.debug-control .coord-value {
+  font-weight: 500;
+  color: #fff;
 }
 </style>
 

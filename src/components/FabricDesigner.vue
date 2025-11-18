@@ -60,6 +60,23 @@
       <button @click="applyColorToSelection" class="toolbar-btn" :disabled="!hasSelection">
         🎨 Appliquer couleur
       </button>
+      <div class="toolbar-separator"></div>
+      <label class="toolbar-btn">
+        Angle (°):
+        <input 
+          type="number" 
+          v-model.number="rotationAngle" 
+          min="-360" 
+          max="360" 
+          step="1"
+          class="rotation-input"
+          placeholder="0"
+        />
+      </label>
+      <button @click="applyRotation" class="toolbar-btn" :disabled="!hasSelection">
+        🔄 Appliquer rotation
+      </button>
+      <div class="toolbar-separator"></div>
       <label class="toolbar-btn">
         Largeur:
         <input type="range" v-model.number="drawWidth" min="1" max="20" @input="updateBrush" />
@@ -140,6 +157,9 @@
                 <span>W:</span> {{ obj.width.toFixed(1) }}, 
                 <span>H:</span> {{ obj.height.toFixed(1) }}
               </div>
+              <div class="object-detail-row center-coords">
+                <span>Centre:</span> ({{ obj.centerX.toFixed(1) }}, {{ obj.centerY.toFixed(1) }})
+              </div>
               <div class="object-detail-row">
                 <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
               </div>
@@ -207,6 +227,12 @@ const emit = defineEmits([
 
 // ===== PROPS =====
 const props = defineProps({
+  // Méthode pour mise à jour directe de la texture (bypass du store réactif)
+  // Utilisée pour les événements fréquents (object:moving, object:scaling)
+  updateTextureDirect: {
+    type: Function,
+    default: null
+  },
   canvasWidth: {
     type: Number,
     default: 800  // Largeur du canvas en pixels
@@ -245,6 +271,7 @@ const isDrawMode = ref(false)    // Mode dessin libre actif
 const drawColor = ref('#000000')  // Couleur du pinceau
 const drawWidth = ref(5)          // Largeur du pinceau en pixels
 const placementMode = ref(null)   // Mode placement: null, 'circle', 'rectangle', 'text', 'image'
+const rotationAngle = ref(0)      // Angle de rotation en degrés
 
 // ===== DÉBOGAGE DES CONTRÔLES 2D =====
 const detectedControl2D = ref({
@@ -275,7 +302,9 @@ const canvasHeight = props.canvasHeight || 600
 
 // ===== STORE POUR LA SYNCHRONISATION =====
 // Store pour signaler les mises à jour de texture à Three.js
-const { requestTextureUpdate } = useCanvasTextureStore()
+// requestTextureUpdate: throttled avec RAF (pour événements fréquents)
+// requestTextureUpdateImmediate: immédiat (pour événements critiques)
+const { requestTextureUpdate, requestTextureUpdateImmediate } = useCanvasTextureStore()
 
 // ===== SYSTÈME D'HISTORIQUE (UNDO/REDO) =====
 let history = []                    // Historique des états du canvas (JSON)
@@ -309,12 +338,18 @@ const saveHistory = () => {
   }
 }
 
-// Vérifier si un objet est sélectionné
-const hasSelection = computed(() => {
-  if (!canvas) return false
+// Vérifier si un objet est sélectionné (ref réactive pour la réactivité Vue)
+const hasSelection = ref(false)
+
+// Fonction pour mettre à jour hasSelection
+const updateHasSelection = () => {
+  if (!canvas) {
+    hasSelection.value = false
+    return
+  }
   const activeObject = canvas.getActiveObject()
-  return activeObject !== null && activeObject !== undefined
-})
+  hasSelection.value = activeObject !== null && activeObject !== undefined
+}
 
 onMounted(async () => {
   await nextTick()
@@ -1286,10 +1321,17 @@ const initCanvas = () => {
       }, 100)
     })
 
-    // Fonction helper pour signaler les changements
+    // Fonction helper pour signaler les changements (événements critiques)
     const signalChange = () => {
       canvas.renderAll() // Forcer le rendu du canvas
-      requestTextureUpdate() // Signal au store pour mettre à jour la texture
+      requestTextureUpdateImmediate() // Mise à jour immédiate pour événements critiques
+      emit('design-updated', canvas) // Émettre l'événement
+    }
+    
+    // Fonction helper pour signaler les changements fréquents (throttled)
+    const signalChangeThrottled = () => {
+      canvas.renderAll() // Forcer le rendu du canvas
+      requestTextureUpdate() // Mise à jour throttled avec RAF
       emit('design-updated', canvas) // Émettre l'événement
     }
 
@@ -1300,8 +1342,11 @@ const initCanvas = () => {
     // Mettre à jour la liste quand un objet est sélectionné
     canvas.on('selection:created', (e) => {
       updateObjectsList2D()
+      updateHasSelection() // Mettre à jour hasSelection
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Mettre à jour l'angle de rotation dans l'input
+        rotationAngle.value = activeObject.angle || 0
         // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
         if (activeObject.userData?.controlsConfig) {
           activeObject.setControlsVisibility(activeObject.userData.controlsConfig)
@@ -1362,8 +1407,11 @@ const initCanvas = () => {
     })
     
     canvas.on('selection:updated', (e) => {
+      updateHasSelection() // Mettre à jour hasSelection
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+        // Mettre à jour l'angle de rotation dans l'input
+        rotationAngle.value = activeObject.angle || 0
         // Si l'objet a une configuration de contrôles personnalisée, l'utiliser
         if (activeObject.userData?.controlsConfig) {
           activeObject.setControlsVisibility(activeObject.userData.controlsConfig)
@@ -1424,6 +1472,7 @@ const initCanvas = () => {
     })
     
     canvas.on('selection:cleared', () => {
+      updateHasSelection() // Mettre à jour hasSelection
       // Vider la liste des objets multi-sélectionnés
       if (canvas.userData?.multiSelectedObjects) {
         canvas.userData.multiSelectedObjects = []
@@ -1506,9 +1555,14 @@ const initCanvas = () => {
         })
       }
       
-      // Pendant le déplacement, mettre à jour fréquemment
+      // Pendant le déplacement, mettre à jour fréquemment (MISE À JOUR DIRECTE - plus rapide)
       canvas.renderAll()
-      requestTextureUpdate()
+      // Utiliser la mise à jour directe si disponible (bypass du store réactif)
+      if (props.updateTextureDirect) {
+        props.updateTextureDirect() // Mise à jour directe ~0-16ms
+      } else {
+        requestTextureUpdate() // Fallback vers le store si méthode directe non disponible
+      }
     })
     canvas.on('object:moved', async (e) => {
       const obj = e.target
@@ -1580,9 +1634,14 @@ const initCanvas = () => {
         })
       }
       
-      // Pendant le redimensionnement, mettre à jour en temps réel
+      // Pendant le redimensionnement, mettre à jour en temps réel (MISE À JOUR DIRECTE - plus rapide)
       canvas.renderAll()
-      requestTextureUpdate()
+      // Utiliser la mise à jour directe si disponible (bypass du store réactif)
+      if (props.updateTextureDirect) {
+        props.updateTextureDirect() // Mise à jour directe ~0-16ms
+      } else {
+        requestTextureUpdate() // Fallback vers le store si méthode directe non disponible
+      }
       emit('design-updated', canvas)
     })
     // Événement après le redimensionnement (scaling terminé)
@@ -1619,6 +1678,11 @@ const initCanvas = () => {
       // S'assurer que les coordonnées sont à jour après la rotation
       if (obj && obj.setCoords) {
         obj.setCoords()
+      }
+      
+      // Mettre à jour l'angle dans l'input si l'objet est sélectionné
+      if (obj === canvas.getActiveObject()) {
+        rotationAngle.value = obj.angle || 0
       }
       
       // Mettre à jour la liste des objets 2D après rotation
@@ -1871,12 +1935,12 @@ const initCanvas = () => {
     })
     
     canvas.on('after:render', () => {
-      // Debounced updates from render
+      // Debounced updates from render (utilise RAF pour meilleure performance)
       if (renderTimeout) {
         clearTimeout(renderTimeout)
       }
       renderTimeout = setTimeout(() => {
-        requestTextureUpdate()
+        requestTextureUpdate() // Throttled avec RAF pour performance optimale
         emit('design-updated', canvas)
       }, 100)
     })
@@ -1945,6 +2009,7 @@ const deselectObject = () => {
   if (!canvas) return
   
   canvas.discardActiveObject()
+  updateHasSelection() // Mettre à jour hasSelection
   canvas.renderAll()
   requestTextureUpdate()
   emit('design-updated', canvas)
@@ -1962,6 +2027,7 @@ const deleteSelected = () => {
       canvas.remove(activeObject)
     }
     canvas.discardActiveObject()
+    updateHasSelection() // Mettre à jour hasSelection
     canvas.renderAll()
     requestTextureUpdate()
     emit('design-updated', canvas)
@@ -2106,6 +2172,77 @@ const applyColorToSelection = () => {
   requestTextureUpdate()
   emit('design-updated', canvas)
   
+}
+
+const applyRotation = () => {
+  if (!canvas) return
+  
+  const activeObject = canvas.getActiveObject()
+  
+  if (!activeObject) {
+    alert('Veuillez d\'abord sélectionner un objet (cliquez dessus)')
+    return
+  }
+  
+  // Normaliser l'angle entre -360 et 360
+  let angle = rotationAngle.value
+  if (angle < -360) angle = -360
+  if (angle > 360) angle = 360
+  
+  // Obtenir le centre actuel de l'objet avant la rotation
+  // getCenterPoint() retourne le centre géométrique réel de l'objet
+  activeObject.setCoords() // S'assurer que les coordonnées sont à jour
+  const centerBefore = activeObject.getCenterPoint()
+  const centerX = centerBefore.x
+  const centerY = centerBefore.y
+  
+  // Appliquer la rotation à l'objet
+  activeObject.set({ angle: angle })
+  activeObject.setCoords()
+  
+  // Obtenir le nouveau centre après rotation
+  const centerAfter = activeObject.getCenterPoint()
+  
+  // Calculer le décalage nécessaire pour ramener le centre à sa position d'origine
+  const deltaX = centerX - centerAfter.x
+  const deltaY = centerY - centerAfter.y
+  
+  // Ajuster la position pour maintenir le même centre
+  activeObject.set({
+    left: (activeObject.left || 0) + deltaX,
+    top: (activeObject.top || 0) + deltaY
+  })
+  activeObject.setCoords()
+  
+  // Synchroniser les copies wrap-around si l'objet roté est un original
+  if (!activeObject.userData?.isWorkZoneIndicator && !activeObject.userData?.isWrapAroundCopy) {
+    syncAllCopiesWithOriginal(activeObject)
+  } else if (activeObject.userData?.isWrapAroundCopy) {
+    // Si c'est une copie qui est rotée, synchroniser avec l'original
+    const original = activeObject.userData?.originalObject
+    if (original) {
+      original.set({ angle: angle })
+      original.setCoords()
+      syncAllCopiesWithOriginal(original)
+    }
+  }
+  
+  // Mettre à jour la liste des objets 2D après rotation
+  updateObjectsList2D()
+  
+  // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
+  if (!activeObject.userData?.isWorkZoneIndicator) {
+    emit('object-rotated', {
+      object: activeObject,
+      angle: angle // Angle en degrés
+    })
+  }
+  
+  canvas.renderAll()
+  requestTextureUpdate()
+  emit('design-updated', canvas)
+  saveHistory()
+  signalChange()
 }
 
 const toggleDrawMode = () => {
@@ -3063,6 +3200,56 @@ const updateObjectsList2D = () => {
       // Calculer les coordonnées des contrôles
       const controls = calculateControlCoordinates2D(obj)
       
+      // Calculer le centre géométrique réel de l'élément
+      // Le centre est l'intersection des diagonales, ce qui reste fixe même après rotation
+      let centerX = 0
+      let centerY = 0
+      
+      if (controls.tl && controls.tr && controls.bl && controls.br) {
+        // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
+        // Cela donne toujours le centre géométrique réel, même après rotation
+        const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
+        const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
+        const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
+        const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
+        
+        // Formule d'intersection de deux segments de ligne
+        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if (Math.abs(denom) > 0.001) {
+          const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+          centerX = x1 + t * (x2 - x1)
+          centerY = y1 + t * (y2 - y1)
+        } else {
+          // Fallback : moyenne des 4 coins si les diagonales sont parallèles
+          centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
+          centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
+        }
+      } else {
+        // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
+        const originX = obj.originX || 'left'
+        const originY = obj.originY || 'top'
+        const objLeft = obj.left || 0
+        const objTop = obj.top || 0
+        
+        let actualLeft = objLeft
+        let actualTop = objTop
+        
+        if (originX === 'center') {
+          actualLeft = objLeft - objWidth / 2
+        } else if (originX === 'right') {
+          actualLeft = objLeft - objWidth
+        }
+        
+        if (originY === 'center') {
+          actualTop = objTop - objHeight / 2
+        } else if (originY === 'bottom') {
+          actualTop = objTop - objHeight
+        }
+        
+        centerX = actualLeft + objWidth / 2
+        centerY = actualTop + objHeight / 2
+      }
+      
       return {
         id: obj.id || `obj-${index}`,
         type: obj.type || 'unknown',
@@ -3072,7 +3259,9 @@ const updateObjectsList2D = () => {
         height: objHeight,
         opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
         isSelected: isSelected,
-        controls: controls
+        controls: controls,
+        centerX: centerX,
+        centerY: centerY
       }
     })
   } finally {
@@ -3103,6 +3292,7 @@ const selectObjectAtPosition = (x, y) => {
     const targetObject = obj
     
     canvas.setActiveObject(targetObject)
+    updateHasSelection() // Mettre à jour hasSelection
     // Activer les contrôles pour l'objet sélectionné
     activateControlsForObject(targetObject)
     canvas.renderAll()
@@ -3270,6 +3460,7 @@ const selectObjectAtPosition = (x, y) => {
     const targetObject = closestObj
     
     canvas.setActiveObject(targetObject)
+    updateHasSelection() // Mettre à jour hasSelection
     // Activer les contrôles pour l'objet sélectionné
     activateControlsForObject(targetObject)
     canvas.renderAll()
@@ -3283,6 +3474,7 @@ const selectObjectAtPosition = (x, y) => {
   }
   
   canvas.discardActiveObject()
+  updateHasSelection() // Mettre à jour hasSelection
   canvas.renderAll()
   emit('object-deselected')
   
@@ -3824,6 +4016,16 @@ defineExpose({
 
 .toolbar-btn input[type="range"] {
   width: 80px;
+}
+
+.toolbar-btn input[type="number"],
+.toolbar-btn .rotation-input {
+  width: 70px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 14px;
+  text-align: center;
 }
 
 .export-btn {

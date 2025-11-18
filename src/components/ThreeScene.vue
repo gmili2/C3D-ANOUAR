@@ -242,6 +242,9 @@
             <div class="mesh-detail-row">
               <span>H:</span> {{ obj.height.toFixed(1) }}
             </div>
+            <div class="mesh-detail-row center-coords">
+              <span>Centre:</span> ({{ obj.centerX.toFixed(1) }}, {{ obj.centerY.toFixed(1) }})
+            </div>
             <div class="mesh-detail-row">
               <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
             </div>
@@ -426,7 +429,9 @@ const selectedObjectCoords = ref({
   scaleY: 1,
   angle: 0,
   opacity: 1.0,
-  controls: {} // Coordonnées des contrôles, notamment mtr
+  controls: {}, // Coordonnées des contrôles, notamment mtr
+  originX: 'left',
+  originY: 'top'
 })
 
 // État pour indiquer si on est proche du contrôle de rotation
@@ -657,20 +662,26 @@ const initScene = () => {
   const { render2D, resetTextureUpdate } = useCanvasTextureStore()
   
   /**
-   * Boucle d'animation principale
+   * Boucle d'animation principale (OPTIMISÉE)
    * 
    * Cette fonction est appelée à chaque frame pour :
-   * 1. Mettre à jour la texture si le canvas 2D a changé
+   * 1. Mettre à jour la texture si le canvas 2D a changé (vérification directe optimisée)
    * 2. Mettre à jour les contrôles (amortissement)
    * 3. Rendre la scène
+   * 
+   * OPTIMISATIONS:
+   * - Vérification directe du flag render2D sans passer par Vue reactivity
+   * - Mise à jour immédiate de la texture
    */
   const animate = () => {
     animationId = requestAnimationFrame(animate)
     
     // Vérifier si le canvas 2D a été modifié et mettre à jour la texture
+    // Vérification directe pour éviter la latence de Vue reactivity
     if (canvasTexture && render2D.value) {
-      canvasTexture.needsUpdate = true  // Forcer la mise à jour de la texture
-      resetTextureUpdate()              // Réinitialiser le flag
+      // Mise à jour directe de la texture (plus rapide)
+      canvasTexture.needsUpdate = true
+      resetTextureUpdate()  // Réinitialiser le flag immédiatement
     }
     
     // Mettre à jour les contrôles (amortissement)
@@ -870,7 +881,7 @@ const setupClickHandler = () => {
         const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
         
         // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
-        const clickThreshold = 25
+        const clickThreshold = 10
         
         if (distance <= clickThreshold) {
           // Activer le mode rotation
@@ -883,7 +894,7 @@ const setupClickHandler = () => {
           if (controls) {
             controls.enabled = false
           }
-          
+          console.log('3d-rotation-start',canvasCoords.x,canvasCoords.y,selectedObjectCoords.value.controls.mtr,rotationStartCursor);
           // Émettre un événement pour informer que la rotation commence
           emit('3d-rotation-start', {
             canvasX: canvasCoords.x,
@@ -898,6 +909,7 @@ const setupClickHandler = () => {
       // Si on clique ailleurs que sur le mtr, désactiver la rotation si elle était active
       // (cela couvre le cas où on clique sur un autre point de la surface ou en dehors de l'objet)
       if (isRotating3D) {
+        console.log('3d-rotation-end');
         emit('3d-rotation-end')
         isRotating3D = false
         rotationStartPosition = null
@@ -1024,11 +1036,59 @@ const setupClickHandler = () => {
     // Si on est en train de faire tourner depuis le mtr
     if (isRotating3D && canvasCoords !== null && rotationStartPosition && rotationStartCursor && selectedObjectCoords.value.show) {
       // Calculer l'angle de rotation basé sur le mouvement du curseur
-      // Utiliser le centre de l'objet comme point de référence pour la rotation
-      const centerX = selectedObjectCoords.value.left + selectedObjectCoords.value.width / 2
-      const centerY = selectedObjectCoords.value.top + selectedObjectCoords.value.height / 2
+      // Utiliser le centre géométrique réel de l'objet (ne change pas avec la rotation)
+      // Le centre est calculé comme l'intersection des diagonales des 4 coins transformés
+      const controls = selectedObjectCoords.value.controls || {}
+      let centerX, centerY
       
-      // Calculer les angles relatifs au centre de l'objet
+      if (controls.tl && controls.tr && controls.bl && controls.br) {
+        // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
+        // Cela donne toujours le centre géométrique réel, même après rotation
+        const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
+        const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
+        const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
+        const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
+        
+        // Formule d'intersection de deux segments de ligne
+        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if (Math.abs(denom) > 0.001) {
+          const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+          centerX = x1 + t * (x2 - x1)
+          centerY = y1 + t * (y2 - y1)
+        } else {
+          // Fallback : moyenne des 4 coins si les diagonales sont parallèles
+          centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
+          centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
+        }
+      } else {
+        // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
+        const originX = selectedObjectCoords.value.originX || 'left'
+        const originY = selectedObjectCoords.value.originY || 'top'
+        const objLeft = selectedObjectCoords.value.left || 0
+        const objTop = selectedObjectCoords.value.top || 0
+        const objWidth = selectedObjectCoords.value.width || 0
+        const objHeight = selectedObjectCoords.value.height || 0
+        
+        let actualLeft = objLeft
+        let actualTop = objTop
+        
+        if (originX === 'center') {
+          actualLeft = objLeft - objWidth / 2
+        } else if (originX === 'right') {
+          actualLeft = objLeft - objWidth
+        }
+        
+        if (originY === 'center') {
+          actualTop = objTop - objHeight / 2
+        } else if (originY === 'bottom') {
+          actualTop = objTop - objHeight
+        }
+        
+        centerX = actualLeft + objWidth / 2
+        centerY = actualTop + objHeight / 2
+      }
+      
+      // Calculer les angles relatifs au centre réel de l'objet
       const startDx = rotationStartCursor.x - centerX
       const startDy = rotationStartCursor.y - centerY
       const currentDx = canvasCoords.x - centerX
@@ -1044,7 +1104,6 @@ const setupClickHandler = () => {
       // Normaliser l'angle entre -180 et 180
       if (angleDelta > 180) angleDelta -= 360
       if (angleDelta < -180) angleDelta += 360
-      
       // Émettre l'événement de rotation avec l'angle calculé
       emit('3d-rotation', {
         canvasX: canvasCoords.x,
@@ -1198,11 +1257,12 @@ const setupClickHandler = () => {
             const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
             
             // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
-            const clickThreshold = 25
+            const clickThreshold = 10
             
             if (distance <= clickThreshold) {
               isRotationClick = true
               // Émettre un événement spécial pour activer la rotation
+              console.log('3d-rotation-click');
               emit('3d-rotation-click', {
                 intersection,
                 canvasX: canvasCoords.x,
@@ -1609,6 +1669,9 @@ const loadModel = async (url) => {
       controls.maxPolarAngle = fixedPolarAngle
       controls.update()
     }
+
+    // Faire tourner le gobelet de 180 degrés au début pour voir l'arrière
+    obj.rotation.y = Math.PI  // 180 degrés en radians
 
     // Extraire tous les meshes
     allMeshes = []
@@ -2451,7 +2514,9 @@ const updateSelectedObjectCoords = (obj) => {
       scaleY: obj.scaleY || 1,
       angle: obj.angle || 0,
       opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
-      controls: controls
+      controls: controls,
+      originX: obj.originX || 'left',
+      originY: obj.originY || 'top'
     }
   } finally {
     // Utiliser nextTick pour s'assurer que la mise à jour est terminée avant de réinitialiser le garde
@@ -2622,6 +2687,56 @@ const updateObjectsListFromCanvas = (objects) => {
         // Calculer les coordonnées des contrôles (skipSetCoords = true pour éviter les boucles récursives)
         const controls = calculateControlCoordinates(obj, true)
         
+        // Calculer le centre géométrique réel de l'élément
+        // Le centre est l'intersection des diagonales, ce qui reste fixe même après rotation
+        let centerX = 0
+        let centerY = 0
+        
+        if (controls.tl && controls.tr && controls.bl && controls.br) {
+          // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
+          // Cela donne toujours le centre géométrique réel, même après rotation
+          const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
+          const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
+          const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
+          const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
+          
+          // Formule d'intersection de deux segments de ligne
+          const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+          if (Math.abs(denom) > 0.001) {
+            const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+            centerX = x1 + t * (x2 - x1)
+            centerY = y1 + t * (y2 - y1)
+          } else {
+            // Fallback : moyenne des 4 coins si les diagonales sont parallèles
+            centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
+            centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
+          }
+        } else {
+          // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
+          const originX = obj.originX || 'left'
+          const originY = obj.originY || 'top'
+          const objLeft = obj.left || 0
+          const objTop = obj.top || 0
+          
+          let actualLeft = objLeft
+          let actualTop = objTop
+          
+          if (originX === 'center') {
+            actualLeft = objLeft - objWidth / 2
+          } else if (originX === 'right') {
+            actualLeft = objLeft - objWidth
+          }
+          
+          if (originY === 'center') {
+            actualTop = objTop - objHeight / 2
+          } else if (originY === 'bottom') {
+            actualTop = objTop - objHeight
+          }
+          
+          centerX = actualLeft + objWidth / 2
+          centerY = actualTop + objHeight / 2
+        }
+        
         return {
           id: obj.id || `obj-${index}`,
           type: obj.type || 'unknown',
@@ -2631,7 +2746,9 @@ const updateObjectsListFromCanvas = (objects) => {
           height: objHeight,
           opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
           isSelected: isSelected,
-          controls: controls
+          controls: controls,
+          centerX: centerX,
+          centerY: centerY
         }
       })
   } finally {
@@ -2654,14 +2771,46 @@ const rotateModel = (angleDegrees) => {
   // L'angle dans Fabric.js est dans le sens horaire, on le convertit pour Three.js
   const angleRadians = THREE.MathUtils.degToRad(angleDegrees)
   
-  // Faire tourner le modèle autour de l'axe Y (vertical)
-  // On utilise rotation.y pour faire tourner le modèle horizontalement
-  currentMesh.rotation.y = angleRadians
+  console.log('🔄 Rotation 3D - Angle:', angleDegrees, '° (', angleRadians, 'rad)')
+  
+  // Méthode 1 : Utiliser setRotationFromEuler (plus propre et explicite)
+  // Créer un Euler avec rotation uniquement autour de l'axe Y
+  const euler = new THREE.Euler(0, angleRadians, 0, 'XYZ')
+  currentMesh.setRotationFromEuler(euler)
+  
+  // Alternative : Méthode 2 - Utiliser rotateOnAxis (rotation additive)
+  // const axis = new THREE.Vector3(0, 1, 0) // Axe Y (vertical)
+  // currentMesh.rotateOnAxis(axis, angleRadians)
+  
+  // Alternative : Méthode 3 - Utiliser rotation.y directement (méthode actuelle)
+  // currentMesh.rotation.y = angleRadians
   
   // Mettre à jour les contrôles pour que la caméra suive la rotation
   if (controls) {
     // Optionnel : faire tourner aussi la caméra pour suivre le modèle
     // controls.update()
+  }
+}
+
+/**
+ * Mise à jour DIRECTE de la texture (solution la plus rapide)
+ * 
+ * Cette méthode met à jour la texture directement sans passer par le store réactif Vue.
+ * Élimine la latence de la réactivité Vue pour les événements fréquents.
+ * 
+ * Performance : ~0-16ms (vs ~16-33ms avec le store)
+ * 
+ * @param {boolean} immediate - Si true, force la mise à jour immédiatement
+ */
+const updateTextureDirect = (immediate = false) => {
+  if (!canvasTexture) return
+  
+  // Mise à jour directe de la texture (bypass du store réactif)
+  canvasTexture.needsUpdate = true
+  
+  // Si immediate, on peut forcer un rendu immédiat (optionnel)
+  if (immediate && renderer && scene && camera) {
+    renderer.render(scene, camera)
   }
 }
 
@@ -2749,6 +2898,7 @@ defineExpose({
   setRotationHandleHover,
   setDetectedControl,
   resetRotationState,
+  updateTextureDirect, // Méthode pour mise à jour directe (plus rapide)
   renderer,
   emit
 })

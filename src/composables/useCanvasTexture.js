@@ -13,9 +13,16 @@
 import { ref } from 'vue'
 import * as THREE from 'three'
 
-// ===== STORE SIMPLE POUR LA SYNCHRONISATION =====
+// ===== STORE OPTIMISÉ POUR LA SYNCHRONISATION =====
 // Flag réactif pour indiquer qu'une mise à jour de texture est nécessaire
 const render2D = ref(false)
+
+// Variables pour l'optimisation avec RAF (RequestAnimationFrame)
+let textureUpdateScheduled = false
+let rafId = null
+
+// Mode immédiat pour les événements critiques (ajout, suppression)
+let immediateMode = false
 
 /**
  * Store pour la synchronisation des textures canvas
@@ -23,16 +30,51 @@ const render2D = ref(false)
  * Ce store permet de signaler quand le canvas 2D (Fabric.js) a été modifié,
  * afin de mettre à jour la texture 3D en temps réel.
  * 
- * @returns {Object} - { render2D, requestTextureUpdate, resetTextureUpdate }
+ * OPTIMISATIONS APPLIQUÉES:
+ * - RAF (RequestAnimationFrame) pour synchroniser avec le cycle de rendu
+ * - Évite les mises à jour multiples dans la même frame
+ * - Mode immédiat pour les événements critiques
+ * 
+ * @returns {Object} - { render2D, requestTextureUpdate, requestTextureUpdateImmediate, resetTextureUpdate }
  */
 export const useCanvasTextureStore = () => {
   /**
-   * Demande une mise à jour de la texture
+   * Demande une mise à jour de la texture (throttled avec RAF)
    * 
-   * Appelé quand le canvas 2D est modifié (ajout, déplacement, suppression d'objets)
+   * Utilise requestAnimationFrame pour synchroniser avec le cycle de rendu.
+   * Évite les mises à jour multiples dans la même frame.
+   * 
+   * Appelé pour les événements fréquents (object:moving, object:scaling)
    */
   const requestTextureUpdate = () => {
+    // Si une mise à jour est déjà planifiée, ne rien faire
+    if (textureUpdateScheduled && !immediateMode) return
+    
+    textureUpdateScheduled = true
+    
+    // Utiliser requestAnimationFrame pour synchroniser avec le rendu
+    if (rafId) cancelAnimationFrame(rafId)
+    
+    rafId = requestAnimationFrame(() => {
+      render2D.value = true
+      textureUpdateScheduled = false
+      immediateMode = false
+      rafId = null
+    })
+  }
+
+  /**
+   * Demande une mise à jour immédiate de la texture (pour événements critiques)
+   * 
+   * Pour les événements critiques comme object:added, object:removed,
+   * on force une mise à jour immédiate sans attendre le prochain RAF.
+   */
+  const requestTextureUpdateImmediate = () => {
+    immediateMode = true
+    if (rafId) cancelAnimationFrame(rafId)
     render2D.value = true
+    textureUpdateScheduled = false
+    rafId = null
   }
 
   /**
@@ -42,12 +84,19 @@ export const useCanvasTextureStore = () => {
    */
   const resetTextureUpdate = () => {
     render2D.value = false
+    textureUpdateScheduled = false
+    immediateMode = false
+    if (rafId) {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
   }
 
   return {
-    render2D,              // Flag réactif (ref)
-    requestTextureUpdate,  // Fonction pour demander une mise à jour
-    resetTextureUpdate     // Fonction pour réinitialiser le flag
+    render2D,                      // Flag réactif (ref)
+    requestTextureUpdate,           // Fonction pour demander une mise à jour (throttled)
+    requestTextureUpdateImmediate,  // Fonction pour mise à jour immédiate (critique)
+    resetTextureUpdate              // Fonction pour réinitialiser le flag
   }
 }
 

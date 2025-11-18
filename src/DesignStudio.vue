@@ -185,6 +185,7 @@
           :canvas-height="500"
           :work-zone-top="workZoneTop / 100"
           :work-zone-bottom="workZoneBottom / 100"
+          :update-texture-direct="() => threeSceneRef?.updateTextureDirect?.()"
           @design-updated="onDesignUpdated"
           @canvas-ready="onFabricCanvasReady"
           @placement-mode-changed="onPlacementModeChanged"
@@ -678,6 +679,7 @@ let rotationInitialAngle = 0
  * Gère le début de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
  */
 const on3DRotationStart = (rotationData) => {
+  console.log('🟣 DesignStudio: on3DRotationStart', rotationData);
   if (!fabricDesignerRef.value) return
   
   const canvas = fabricDesignerRef.value.getCanvas()
@@ -688,6 +690,14 @@ const on3DRotationStart = (rotationData) => {
   
   // Stocker l'angle initial de l'objet
   rotationInitialAngle = activeObject.angle || 0
+  
+  
+  // Activer le mode rotation dans FabricDesigner si mtrCoords est disponible
+  // rotationData contient: { canvasX, canvasY, mtrCoords }
+  if (rotationData && rotationData.mtrCoords && fabricDesignerRef.value.activateRotationMode) {
+    console.log('🟢 DesignStudio: Activating rotation mode with mtrCoords', rotationData.mtrCoords)
+    fabricDesignerRef.value.activateRotationMode(activeObject, rotationData.mtrCoords)
+  }
 }
 
 /**
@@ -695,6 +705,7 @@ const on3DRotationStart = (rotationData) => {
  * Applique la rotation à l'élément dans le canvas 2D
  */
 const on3DRotation = (rotationData) => {
+  console.log('on3DRotation',rotationData);
   if (!fabricDesignerRef.value) return
   
   const canvas = fabricDesignerRef.value.getCanvas()
@@ -705,10 +716,37 @@ const on3DRotation = (rotationData) => {
   
   // Calculer le nouvel angle en ajoutant la différence d'angle à l'angle initial
   const newAngle = rotationInitialAngle + rotationData.angle
+  console.log('🟡 DesignStudio: newAngle', newAngle,rotationInitialAngle,rotationData.angle);
+  
+  // Obtenir le centre actuel de l'objet avant la rotation
+  // getCenterPoint() retourne le centre géométrique réel de l'objet
+  activeObject.setCoords() // S'assurer que les coordonnées sont à jour
+  const centerBefore = activeObject.getCenterPoint()
+  const centerX = centerBefore.x
+  const centerY = centerBefore.y
   
   // Appliquer la rotation à l'objet dans le canvas 2D
+  const angleBefore = activeObject.angle || 0
+  console.log('🔄 Rotation 2D - Angle avant:', angleBefore, '°')
   activeObject.set({ angle: newAngle })
+  activeObject.setCoords() // Nécessaire pour mettre à jour les coordonnées après rotation
+  
+  // Obtenir le nouveau centre après rotation
+  const centerAfter = activeObject.getCenterPoint()
+  
+  // Calculer le décalage nécessaire pour ramener le centre à sa position d'origine
+  const deltaX = centerX - centerAfter.x
+  const deltaY = centerY - centerAfter.y
+  
+  // Ajuster la position pour maintenir le même centre
+  activeObject.set({
+    left: (activeObject.left || 0) + deltaX,
+    top: (activeObject.top || 0) + deltaY
+  })
   activeObject.setCoords()
+  
+  const angleAfter = activeObject.angle || 0
+  console.log('🔄 Rotation 2D - Angle après:', angleAfter, '°')
   canvas.renderAll()
   
   // Mettre à jour les coordonnées des contrôles dans ThreeScene pour refléter la nouvelle rotation

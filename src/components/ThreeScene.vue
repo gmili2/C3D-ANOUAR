@@ -303,6 +303,8 @@ import { setupCanvasTexture, applyTextureToMesh, useCanvasTextureStore } from '.
 import { project3DClickToCanvas } from '../composables/use3DTo2DProjection'
 import TextureUpdater from './TextureUpdater.vue'
 import { log } from 'three'
+// DecalGeometry supprimé pour utiliser les Shaders
+import { get3DPositionFromUV } from '../composables/use2DTo3DProjection'
 
 // ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
@@ -395,6 +397,17 @@ let renderer = null       // Rendu WebGL
 let controls = null       // Contrôles OrbitControls (rotation, zoom, pan)
 let animationId = null   // ID de l'animation frame pour cleanup
 let handleResize = null   // Handler pour le redimensionnement
+
+// ----- Shaders (Optimisation Rotation Pro) -----
+// On stocke les références aux uniforms pour pouvoir les mettre à jour rapidement
+let shaderUniforms = {
+  uDecalMap: { value: null },
+  uDecalVisible: { value: 0 }, // 0: caché, 1: visible
+  uDecalCenter: { value: new THREE.Vector2(0.5, 0.5) },
+  uDecalScale: { value: new THREE.Vector2(1, 1) },
+  uDecalAngle: { value: 0 }
+}
+let isMaterialPatched = false
 
 // ============================================================================
 // SECTION 2 : AFFICHAGE & UI (Coordonnées et Informations)
@@ -2872,7 +2885,151 @@ const setDetectedControl = (handleInfo, distance = null, x = null, y = null) => 
   }
 }
 
+/**
+ * Prépare le matériau pour supporter le shader de decal
+ * Cette fonction injecte le code GLSL dans le shader standard de Three.js
+ */
+const patchMaterialForDecal = (material) => {
+  if (material.userData.isPatched) return
+  
+  material.onBeforeCompile = (shader) => {
+    // 1. Ajouter nos uniforms
+    shader.uniforms.uDecalMap = shaderUniforms.uDecalMap
+    shader.uniforms.uDecalVisible = shaderUniforms.uDecalVisible
+    shader.uniforms.uDecalCenter = shaderUniforms.uDecalCenter
+    shader.uniforms.uDecalScale = shaderUniforms.uDecalScale
+    shader.uniforms.uDecalAngle = shaderUniforms.uDecalAngle
+    
+    // 2. Déclarer les uniforms et la fonction de rotation dans le Fragment Shader
+    shader.fragmentShader = `
+      uniform sampler2D uDecalMap;
+      uniform float uDecalVisible;
+      uniform vec2 uDecalCenter;
+      uniform vec2 uDecalScale;
+      uniform float uDecalAngle;
+      
+      // Fonction pour tourner un point autour d'un centre
+      vec2 rotateUV(vec2 uv, float rotation, vec2 center) {
+        float c = cos(rotation);
+        float s = sin(rotation);
+        mat2 rotMat = mat2(c, -s, s, c);
+        return rotMat * (uv - center) + center;
+      }
+    ` + shader.fragmentShader
+    
+    // 3. Injecter la logique de compositing
+    // On remplace la fin du calcul de la couleur de base (map_fragment)
+    // pour ajouter notre couche par dessus
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      #include <map_fragment>
+      
+      if (uDecalVisible > 0.5) {
+        // Calculer les UVs transformés pour le decal
+        // 1. Centrer sur le point de pivot (uDecalCenter)
+        vec2 centeredUv = vMapUv - uDecalCenter;
+        
+        // 2. Appliquer la rotation
+        // Note: On inverse l'angle pour matcher le sens horaire
+        float c = cos(-uDecalAngle);
+        float s = sin(-uDecalAngle);
+        vec2 rotatedUv = vec2(
+          centeredUv.x * c - centeredUv.y * s,
+          centeredUv.x * s + centeredUv.y * c
+        );
+        
+        // 3. Appliquer l'échelle (inverse car on transforme les coordonnées, pas l'image)
+        vec2 finalUv = rotatedUv / uDecalScale;
+        
+        // 4. Ramener dans l'espace texture (0-1)
+        // Le centre de la texture decal est (0.5, 0.5)
+        finalUv += vec2(0.5, 0.5);
+        
+        // Vérifier si on est dans les bornes de la texture decal
+        if (finalUv.x >= 0.0 && finalUv.x <= 1.0 && finalUv.y >= 0.0 && finalUv.y <= 1.0) {
+          vec4 decalColor = texture2D(uDecalMap, finalUv);
+          
+          // Mélange alpha (Compositing)
+          // diffuseColor est la variable de Three.js qui contient la couleur accumulée
+          diffuseColor.rgb = mix(diffuseColor.rgb, decalColor.rgb, decalColor.a);
+        }
+      }
+      `
+    )
+  }
+  
+  material.userData.isPatched = true
+  // Forcer la recompilation
+  material.needsUpdate = true
+}
+
+/**
+ * Démarre la rotation optimisée via Shader
+ */
+const startDecalRotation = async (objectProps, dataUrl) => {
+  if (!currentMesh || !dataUrl || !scene) return
+
+  try {
+    // 1. Charger la texture
+    const textureLoader = new THREE.TextureLoader()
+    const texture = await textureLoader.loadAsync(dataUrl)
+    
+    // 2. S'assurer que le matériau est patché
+    let targetMaterial = null
+    currentMesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        targetMaterial = child.material
+      }
+    })
+    
+    if (targetMaterial) {
+      patchMaterialForDecal(targetMaterial)
+    }
+    
+    // 3. Calculer les coordonnées UV du centre
+    const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
+    const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
+    
+    const centerX = objectProps.left + objectProps.width / 2
+    const centerY = objectProps.top + objectProps.height / 2
+    
+    const centerU = centerX / canvasWidth
+    // Inversion Y standard pour les UVs
+    const centerV = 1 - (centerY / canvasHeight)
+    
+    // 4. Calculer l'échelle UV
+    // Quelle portion de l'espace UV (0-1) l'objet occupe-t-il ?
+    const scaleU = objectProps.width / canvasWidth
+    const scaleV = objectProps.height / canvasHeight
+    
+    // 5. Mettre à jour les uniforms
+    shaderUniforms.uDecalMap.value = texture
+    shaderUniforms.uDecalCenter.value.set(centerU, centerV)
+    shaderUniforms.uDecalScale.value.set(scaleU, scaleV)
+    shaderUniforms.uDecalAngle.value = objectProps.angle * (Math.PI / 180)
+    shaderUniforms.uDecalVisible.value = 1
+    
+  } catch (e) {
+    console.error("Erreur setup shader:", e)
+  }
+}
+
+const updateDecalRotation = (absoluteAngle) => {
+  // Mise à jour ultra-rapide via uniform (GPU)
+  shaderUniforms.uDecalAngle.value = absoluteAngle * (Math.PI / 180)
+}
+
+const endDecalRotation = () => {
+  // Cacher le decal
+  shaderUniforms.uDecalVisible.value = 0
+  shaderUniforms.uDecalMap.value = null
+}
+
 defineExpose({
+  startDecalRotation,
+  updateDecalRotation,
+  endDecalRotation,
   getCurrentMesh: () => currentMesh,
   applyTexture,
   getCanvasTexture: () => canvasTexture,

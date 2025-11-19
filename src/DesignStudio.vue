@@ -674,6 +674,8 @@ const on3DRotationClick = (clickData) => {
 
 // Variable pour stocker l'angle initial de l'objet au début de la rotation
 let rotationInitialAngle = 0
+let lastRotationAngle = 0 // Stocker le dernier angle calculé pour l'appliquer à la fin
+let skipped2DFrames = 0 // Compteur pour les frames 2D sautées (optimisation)
 
 /**
  * Gère le début de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
@@ -690,6 +692,7 @@ const on3DRotationStart = (rotationData) => {
   
   // Stocker l'angle initial de l'objet
   rotationInitialAngle = activeObject.angle || 0
+  skipped2DFrames = 0 // Réinitialiser le compteur
   
   
   // Activer le mode rotation dans FabricDesigner si mtrCoords est disponible
@@ -697,6 +700,29 @@ const on3DRotationStart = (rotationData) => {
   if (rotationData && rotationData.mtrCoords && fabricDesignerRef.value.activateRotationMode) {
     console.log('🟢 DesignStudio: Activating rotation mode with mtrCoords', rotationData.mtrCoords)
     fabricDesignerRef.value.activateRotationMode(activeObject, rotationData.mtrCoords)
+  }
+
+  // OPTIMISATION DECAL: Démarrer la rotation via Decal
+  if (threeSceneRef.value && threeSceneRef.value.startDecalRotation) {
+    // Générer l'image de l'objet pour le decal
+    // Utiliser toDataURL avec un multiplicateur pour une meilleure qualité
+    const dataUrl = activeObject.toDataURL({
+      format: 'png',
+      multiplier: 2
+    })
+    
+    // Démarrer le decal
+    threeSceneRef.value.startDecalRotation({
+      left: activeObject.left,
+      top: activeObject.top,
+      width: activeObject.getScaledWidth(),
+      height: activeObject.getScaledHeight(),
+      angle: activeObject.angle || 0
+    }, dataUrl)
+    
+    // Cacher l'objet 2D temporairement
+    activeObject.set('opacity', 0)
+    canvas.renderAll()
   }
 }
 
@@ -716,6 +742,23 @@ const on3DRotation = (rotationData) => {
   
   // Calculer le nouvel angle en ajoutant la différence d'angle à l'angle initial
   const newAngle = rotationInitialAngle + rotationData.angle
+  lastRotationAngle = newAngle // Sauvegarder pour la fin
+  
+  // OPTIMISATION DECAL: Mettre à jour seulement le decal 3D
+  if (threeSceneRef.value && threeSceneRef.value.updateDecalRotation) {
+    threeSceneRef.value.updateDecalRotation(newAngle)
+    
+    // Log pour montrer l'économie de performance
+    skipped2DFrames++
+    if (skipped2DFrames % 10 === 0) {
+      console.log(`⚡ [2D Canvas] SKIPPED Update #${skipped2DFrames} (CPU saved) - Canvas NOT re-rendered`)
+    }
+    
+    // On ne met PAS à jour le canvas 2D ici pour éviter le lag
+    return
+  }
+  
+  // FALLBACK: Si l'optimisation n'est pas disponible, utiliser l'ancienne méthode (lente)
   console.log('🟡 DesignStudio: newAngle', newAngle,rotationInitialAngle,rotationData.angle);
   
   // Obtenir le centre actuel de l'objet avant la rotation
@@ -762,7 +805,71 @@ const on3DRotation = (rotationData) => {
  * Gère la fin de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
  */
 const on3DRotationEnd = () => {
+  // OPTIMISATION DECAL: Terminer la rotation et appliquer le résultat final
+  if (threeSceneRef.value && threeSceneRef.value.endDecalRotation) {
+    threeSceneRef.value.endDecalRotation()
+  }
+
+  if (!fabricDesignerRef.value) {
+    rotationInitialAngle = 0
+    return
+  }
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  if (!canvas) {
+    rotationInitialAngle = 0
+    return
+  }
+  
+  const activeObject = canvas.getActiveObject()
+  if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
+    // Restaurer l'opacité
+    activeObject.set('opacity', 1)
+    
+    // Appliquer la rotation finale stockée dans lastRotationAngle
+    // Si lastRotationAngle est 0 (pas de mouvement), on garde l'angle actuel
+    const finalAngle = lastRotationAngle || activeObject.angle
+    
+    // --- LOGIQUE DE ROTATION AUTOUR DU CENTRE ---
+    // Obtenir le centre actuel de l'objet avant la rotation
+    activeObject.setCoords()
+    const centerBefore = activeObject.getCenterPoint()
+    const centerX = centerBefore.x
+    const centerY = centerBefore.y
+    
+    // Appliquer la rotation
+    activeObject.set({ angle: finalAngle })
+    activeObject.setCoords()
+    
+    // Obtenir le nouveau centre après rotation
+    const centerAfter = activeObject.getCenterPoint()
+    
+    // Calculer le décalage
+    const deltaX = centerX - centerAfter.x
+    const deltaY = centerY - centerAfter.y
+    
+    // Ajuster la position
+    activeObject.set({
+      left: (activeObject.left || 0) + deltaX,
+      top: (activeObject.top || 0) + deltaY
+    })
+    activeObject.setCoords()
+    
+    canvas.renderAll()
+    
+    // Mettre à jour ThreeScene
+    if (threeSceneRef.value && threeSceneRef.value.updateSelectedObjectCoords) {
+      threeSceneRef.value.updateSelectedObjectCoords(activeObject)
+    }
+    
+    // IMPORTANT: Forcer la mise à jour de la texture
+    if (threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
+       // La mise à jour se fera via le watch ou l'event, mais on peut forcer si besoin
+    }
+  }
+  
   rotationInitialAngle = 0
+  lastRotationAngle = 0
   
   // Mettre à jour les coordonnées de l'objet sélectionné pour actualiser la position du mtr
   if (fabricDesignerRef.value) {

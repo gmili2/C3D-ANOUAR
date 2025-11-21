@@ -1739,6 +1739,11 @@ const initCanvas = () => {
         const handleInfo = detectResizeHandle(activeObject, x, y, 10)
         
         if (handleInfo) {
+          // Alert ok si un contrôle est détecté (et qu'il ne l'était pas déjà pour éviter le spam)
+          if (!detectedControl2D.value.show) {
+            alert('ok')
+          }
+
           // Calculer les coordonnées des contrôles
           const controls = calculateControlCoordinates2D(activeObject)
           const controlKey = handleInfo.handle

@@ -728,6 +728,9 @@ const on3DRotationStart = (rotationData) => {
   rotationInitialAngle = activeObject.angle || 0
   skipped2DFrames = 0 // Réinitialiser le compteur
   
+  // Activer le flag de rotation
+  isRotating.value = true
+  
   
   // Activer le mode rotation dans FabricDesigner si mtrCoords est disponible
   // rotationData contient: { canvasX, canvasY, mtrCoords }
@@ -962,6 +965,9 @@ const on3DRotationEnd = () => {
   rotationInitialAngle = 0
   lastRotationAngle = 0
   
+  // Désactiver le flag de rotation
+  isRotating.value = false
+  
   // Mettre à jour les coordonnées de l'objet sélectionné pour actualiser la position du mtr
   if (fabricDesignerRef.value) {
     const canvas = fabricDesignerRef.value.getCanvas()
@@ -1160,6 +1166,9 @@ const isResizing = ref(false)
 const resizeStartPos = ref({ x: 0, y: 0 })
 const currentResizeHandle = ref(null)
 
+// Variable pour la rotation
+const isRotating = ref(false)
+
 // Variables pour le drag - stocker le décalage initial entre le clic et l'objet
 const dragStartPos = ref({ x: 0, y: 0 })
 const dragOffset = ref({ x: 0, y: 0 })
@@ -1316,8 +1325,8 @@ const on3DHover = (hoverData) => {
     }
     
       // Remettre le curseur par défaut (move pour déplacement)
-      if (threeSceneRef.value && threeSceneRef.value.renderer) {
-        const element = threeSceneRef.value.renderer.domElement
+      if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
+        const element = threeSceneRef.value.renderer().domElement
         const defaultCursor = dragMode.value ? 'move' : 'default'
         element.style.setProperty('cursor', defaultCursor, 'important')
       }
@@ -1426,34 +1435,24 @@ const on3DHover = (hoverData) => {
       }
       
       // Changer le curseur selon le type de handle
-      if (threeSceneRef.value && threeSceneRef.value.renderer) {
+      // Seulement si on n'est pas en train de draguer ou faire une rotation
+      // (on permet le changement pendant le resize pour garder le bon curseur)
+      if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer() && !isDragging.value && !isRotating.value) {
         let cursor = 'move' // Par défaut, curseur de déplacement
         
         if (handleInfo.corner) {
           // Curseur diagonal pour les coins
-          // tl (top-left) = nw-resize (nord-ouest)
-          // tr (top-right) = ne-resize (nord-est)
-          // bl (bottom-left) = nesw-resize (sud-ouest, mais on utilise nwse pour l'inverse)
-          // br (bottom-right) = se-resize (sud-est, mais on utilise nwse pour l'inverse)
-          if (handleInfo.corner === 'tl') {
-            cursor = 'nw-resize' // Nord-ouest
-          } else if (handleInfo.corner === 'tr') {
-            cursor = 'ne-resize' // Nord-est
-          } else if (handleInfo.corner === 'bl') {
-            cursor = 'nesw-resize' // Sud-ouest (diagonale /)
-          } else if (handleInfo.corner === 'br') {
-            cursor = 'nwse-resize' // Sud-est (diagonale \)
+          if (handleInfo.corner === 'tl' || handleInfo.corner === 'br') {
+            cursor = 'nwse-resize' // Diagonale \
+          } else if (handleInfo.corner === 'tr' || handleInfo.corner === 'bl') {
+            cursor = 'nesw-resize' // Diagonale /
           }
         } else if (handleInfo.edge) {
           // Curseur pour les bords
-          if (handleInfo.edge === 'left') {
-            cursor = 'w-resize' // Ouest (gauche)
-          } else if (handleInfo.edge === 'right') {
-            cursor = 'e-resize' // Est (droite)
-          } else if (handleInfo.edge === 'top') {
-            cursor = 'n-resize' // Nord (haut)
-          } else if (handleInfo.edge === 'bottom') {
-            cursor = 'ns-resize' // Vertical (nord-sud) pour le bas aussi
+          if (handleInfo.edge === 'left' || handleInfo.edge === 'right') {
+            cursor = 'ew-resize' // Horizontal
+          } else if (handleInfo.edge === 'top' || handleInfo.edge === 'bottom') {
+            cursor = 'ns-resize' // Vertical
           }
         } else if (handleInfo.isRotation) {
           // Curseur pour le contrôle de rotation
@@ -1461,8 +1460,8 @@ const on3DHover = (hoverData) => {
         }
         
         // Appliquer le curseur
-        if (threeSceneRef.value.renderer && threeSceneRef.value.renderer.domElement) {
-          const element = threeSceneRef.value.renderer.domElement
+        if (threeSceneRef.value.renderer() && threeSceneRef.value.renderer().domElement) {
+          const element = threeSceneRef.value.renderer().domElement
           
           // Utiliser setProperty pour forcer l'application
           element.style.setProperty('cursor', cursor, 'important')
@@ -1503,8 +1502,8 @@ const on3DHover = (hoverData) => {
         threeSceneRef.value.setRotationHandleHover(false)
       }
       
-      if (threeSceneRef.value && threeSceneRef.value.renderer) {
-        const element = threeSceneRef.value.renderer.domElement
+      if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
+        const element = threeSceneRef.value.renderer().domElement
         element.style.setProperty('cursor', 'move', 'important')
       }
     }
@@ -1582,8 +1581,8 @@ const on3DResizeEnd = () => {
   }
   
   // Remettre le curseur normal (move pour déplacement)
-  if (threeSceneRef.value && threeSceneRef.value.renderer) {
-    const element = threeSceneRef.value.renderer.domElement
+  if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
+    const element = threeSceneRef.value.renderer().domElement
     const defaultCursor = dragMode.value ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }
@@ -1611,8 +1610,8 @@ const on3DDragEnd = () => {
   }
   
   // Remettre le curseur normal (move pour déplacement)
-  if (threeSceneRef.value && threeSceneRef.value.renderer) {
-    const element = threeSceneRef.value.renderer.domElement
+  if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
+    const element = threeSceneRef.value.renderer().domElement
     const defaultCursor = dragMode.value ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }

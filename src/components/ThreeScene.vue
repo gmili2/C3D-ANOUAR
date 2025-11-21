@@ -464,6 +464,7 @@ const selectedObjectCoords = ref({
 // État pour indiquer si on est proche du contrôle de rotation
 const isNearRotationHandle = ref(false)
 
+
 // État pour le débogage des contrôles détectés
 const detectedControl = ref({
   show: false,
@@ -1283,6 +1284,8 @@ const setupClickHandler = () => {
         } else {
           isNearRotationHandle.value = false
         }
+
+
         
         // Log périodique pour déboguer (seulement toutes les 30 frames pour ne pas surcharger)
         if (Math.random() < 0.033) {
@@ -3193,7 +3196,7 @@ const setDetectedControl = (handleInfo, distance = null, x = null, y = null) => 
     }
     return
   }
-  
+
   detectedControl.value = {
     show: true,
     handle: handleInfo.handle || null,
@@ -3430,7 +3433,7 @@ defineExpose({
   setDetectedControl,
   resetRotationState,
   updateTextureDirect, // Méthode pour mise à jour directe (plus rapide)
-  renderer,
+  renderer: () => renderer,
   emit
 })
 </script>

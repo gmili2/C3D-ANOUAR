@@ -135,7 +135,7 @@
         </div>
       </div>
       <!-- Liste de tous les éléments avec leurs contrôles -->
-      <div v-if="allObjectsList2D.length > 0" class="objects-list-2d">
+      <!-- <div v-if="allObjectsList2D.length > 0" class="objects-list-2d">
         <div class="coord-title">📋 Éléments du Canvas ({{ allObjectsList2D.length }})</div>
         <div class="objects-scroll-container">
           <div 
@@ -196,7 +196,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </div> -->
     </div>
   </div>
 </template>
@@ -2624,13 +2624,13 @@ const placeRectangleAt = (x, y) => {
 }
 
 const placeTextAt = (x, y) => {
-  const text = new Textbox('Nouveau texte', {
+  const text = new Textbox('Hello', {
     left: x - 100,
     top: y - 25,
     fontSize: 32,
     fill: drawColor.value || '#000000',
     fontFamily: 'Arial',
-    width: 200,
+    width: 80,
     selectable: true,
     evented: true
   })

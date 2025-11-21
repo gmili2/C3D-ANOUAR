@@ -13,6 +13,19 @@
   <div class="three-scene-container">
     <!-- Canvas WebGL pour le rendu 3D -->
     <canvas ref="canvasElement" class="three-canvas"></canvas>
+    
+    <!-- Bouton flottant pour ajouter un rectangle -->
+    <button 
+      v-if="currentMesh"
+      @click="handleAddRectangleClick"
+      class="add-rectangle-btn"
+      :class="{ 'active': props.placementMode && props.placementType === 'rectangle' }"
+      title="Ajouter un rectangle sur le modèle 3D"
+    >
+      <span class="btn-icon">📐</span>
+      <span class="btn-text">{{ props.placementMode && props.placementType === 'rectangle' ? 'Cliquez sur le modèle' : '+ Rectangle' }}</span>
+    </button>
+    
     <!-- TextureUpdater invisible pour surveiller les mises à jour de texture -->
     <TextureUpdater
       v-if="canvasTexture && renderer && scene && camera"
@@ -369,7 +382,8 @@ const emit = defineEmits([
   '3d-rotation-click',  // Clic sur le contrôle de rotation (mtr) dans la vue 3D
   '3d-rotation-start',  // Début de la rotation depuis le mtr
   '3d-rotation',        // Rotation en cours depuis le mtr
-  '3d-rotation-end'      // Fin de la rotation depuis le mtr
+  '3d-rotation-end',    // Fin de la rotation depuis le mtr
+  'add-rectangle-click' // Clic sur le bouton "+ Rectangle" dans la vue 3D
 ])
 
 // ============================================================================
@@ -743,38 +757,137 @@ let lastDragPosition = null   // Dernière position du glissement
 let isResizing3D = false      // Flag pour indiquer si on est en mode redimensionnement
 let resizeStartPosition = null // Position de départ du redimensionnement
 let resizeHandleInfo = null    // Informations sur le handle utilisé pour le redimensionnement
-let isRotating3D = false      // Flag pour indiquer si on est en mode rotation depuis le mtr
-let rotationStartPosition = null // Position de départ pour la rotation (coordonnées du mtr)
-let rotationStartCursor = null   // Position du curseur au début de la rotation
-let rotationStartAngle = null    // Angle initial de l'objet au début de la rotation
-let rotationJustEnded = false    // Flag pour éviter de détecter la rotation juste après l'avoir terminée
-let rotationEndTime = 0          // Timestamp de la fin de la rotation
+/**
+ * ============================================================================
+ * VARIABLES DE ROTATION - Gestion de la rotation des éléments via le contrôle mtr
+ * ============================================================================
+ * 
+ * Le système de rotation permet à l'utilisateur de faire tourner un élément
+ * sélectionné en cliquant et en glissant le contrôle de rotation (mtr - middle-top-rotate).
+ * 
+ * FONCTIONNEMENT:
+ * 1. L'utilisateur clique sur le contrôle mtr (petite poignée au-dessus de l'élément)
+ * 2. Le système capture la position initiale du curseur et du mtr
+ * 3. Pendant le mouvement, on calcule l'angle entre la position initiale et actuelle
+ * 4. L'angle est calculé par rapport au centre géométrique de l'élément
+ * 5. L'événement '3d-rotation' est émis avec l'angle calculé
+ * 6. Le composant parent (DesignStudio) applique la rotation à l'objet Fabric.js
+ */
+
+// Flag booléen indiquant si une rotation est en cours
+// true = l'utilisateur est en train de faire tourner l'élément
+// false = pas de rotation active
+let isRotating3D = false
+
+// Position initiale du contrôle mtr (middle-top-rotate) au moment du clic
+// Objet avec {x, y} en coordonnées canvas 2D (pixels)
+// Cette position sert de référence pour calculer l'angle de rotation
+// Exemple: { x: 400, y: 150 } si le mtr est à 400px de gauche et 150px du haut
+let rotationStartPosition = null
+
+// Position initiale du curseur au moment du clic sur le mtr
+// Objet avec {x, y} en coordonnées canvas 2D (pixels)
+// Utilisé pour calculer l'angle initial entre le curseur et le centre de l'objet
+// Exemple: { x: 405, y: 155 } si l'utilisateur clique légèrement à côté du mtr
+let rotationStartCursor = null
+
+// Angle initial de l'objet au moment où la rotation commence (en degrés)
+// Actuellement non utilisé car on calcule l'angle delta (différence)
+// Pourrait être utilisé pour afficher l'angle absolu de l'objet
+let rotationStartAngle = null
+
+// Centre géométrique de l'objet calculé au début de la rotation
+// Objet avec {x, y} en coordonnées canvas 2D (pixels)
+// Ce centre est calculé UNE SEULE FOIS au début de la rotation et réutilisé
+// pendant toute la durée de la rotation pour éviter les problèmes de décalage
+// Exemple: { x: 400, y: 250 } si le centre de l'objet est à 400px de gauche et 250px du haut
+let rotationCenter = null
+
+// Flag de protection pour éviter les conflits entre rotation et drag
+// true = la rotation vient de se terminer, on ignore les clics pendant un court délai
+// false = on peut détecter une nouvelle rotation
+// Ce flag évite qu'un relâchement de souris après rotation soit interprété comme un drag
+let rotationJustEnded = false
+
+// Timestamp (en millisecondes) du moment où la rotation s'est terminée
+// Utilisé avec rotationJustEnded pour implémenter un délai de protection
+// Exemple: 1700000000000 (timestamp Unix en ms)
+let rotationEndTime = 0
 
 /**
- * Réinitialise l'état de rotation
- * Utile lors du switch entre les vues 2D et 3D
+ * ============================================================================
+ * FONCTION: resetRotationState
+ * ============================================================================
+ * 
+ * Réinitialise complètement l'état de rotation du système.
+ * 
+ * QUAND EST-ELLE APPELÉE:
+ * - Lors du changement de vue (2D ↔ 3D)
+ * - Lors de la désélection d'un objet
+ * - Lors d'une annulation d'opération
+ * 
+ * QUE FAIT-ELLE:
+ * 1. Émet l'événement '3d-rotation-end' si une rotation était en cours
+ * 2. Réinitialise tous les flags et variables de rotation à leur état initial
+ * 3. Restaure le curseur par défaut (move ou default selon le mode)
+ * 4. Réactive les contrôles OrbitControls pour permettre la rotation de la caméra
+ * 
+ * POURQUOI C'EST IMPORTANT:
+ * - Évite les états incohérents où le système pense qu'une rotation est active
+ * - Garantit que l'utilisateur peut à nouveau interagir normalement avec la scène
+ * - Nettoie proprement toutes les ressources liées à la rotation
  */
 const resetRotationState = () => {
+  // Si une rotation est actuellement active, on doit la terminer proprement
   if (isRotating3D) {
-    // Émettre l'événement de fin de rotation si on était en train de rotater
-    emit('3d-rotation-end')
+    // Émettre l'événement de fin de rotation pour que le parent puisse nettoyer
+    // Cet événement permet au composant parent (DesignStudio) de finaliser la rotation
+    // emit('3d-rotation-end')
   }
+  
+  // Réinitialiser le flag de rotation active
+  // false = aucune rotation en cours
   isRotating3D = false
+  
+  // Effacer la position de départ du contrôle mtr
+  // null = pas de position de référence enregistrée
   rotationStartPosition = null
+  
+  // Effacer la position initiale du curseur
+  // null = pas de position de curseur enregistrée
   rotationStartCursor = null
+  
+  // Effacer l'angle initial (non utilisé actuellement)
   rotationStartAngle = null
+  
+  // Effacer le centre géométrique calculé
+  // null = pas de centre enregistré
+  rotationCenter = null
+  
+  // Désactiver le flag de protection "rotation vient de se terminer"
+  // false = on peut détecter une nouvelle rotation immédiatement
   rotationJustEnded = false
+  
+  // Réinitialiser le timestamp de fin de rotation
+  // 0 = pas de rotation récente
   rotationEndTime = 0
   
-  // Remettre le curseur normal
+  // Restaurer le curseur par défaut
   if (renderer && renderer.domElement) {
+    // Déterminer quel curseur utiliser selon le mode actif
+    // 'move' si on est en mode drag, 'default' sinon
     const defaultCursor = props.dragMode ? 'move' : 'default'
+    
+    // Appliquer le curseur avec !important pour surcharger les styles inline
     renderer.domElement.style.setProperty('cursor', defaultCursor, 'important')
   }
   
-  // Réactiver les contrôles OrbitControls
+  // Réactiver COMPLÈTEMENT les contrôles OrbitControls
+  // Pendant la rotation, les contrôles sont désactivés pour éviter les conflits
+  // On les réactive maintenant pour permettre la rotation de la caméra
   if (controls) {
     controls.enabled = true
+    controls.enableRotate = true
   }
 }
 
@@ -836,6 +949,14 @@ const setupClickHandler = () => {
   }
   
   const onMouseDown = (event) => {
+    // BLOQUER OrbitControls pendant la rotation
+    // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
+    if (isRotating3D) {
+      event.stopPropagation()
+      event.preventDefault()
+      console.log('🚫 Événement mousedown bloqué - rotation en cours')
+    }
+    
     if (!props.dragMode) return
     
     const canvasCoords = getCanvasCoords(event)
@@ -878,43 +999,180 @@ const setupClickHandler = () => {
         }
       }
       
-      // Vérifier si on clique sur le contrôle de rotation (mtr) de l'élément sélectionné
-      // Mais seulement si on n'a pas juste terminé une rotation (pour éviter les conflits)
-      const timeSinceRotationEnd = Date.now() - rotationEndTime
-      const minTimeBetweenRotationAndDrag = 100 // 100ms minimum entre la fin de rotation et un nouveau clic
+      /**
+       * ========================================================================
+       * DÉTECTION DU CLIC SUR LE CONTRÔLE DE ROTATION (mtr)
+       * ========================================================================
+       * 
+       * Cette section détecte si l'utilisateur clique sur le contrôle de rotation
+       * (mtr = middle-top-rotate) d'un élément sélectionné.
+       * 
+       * PRÉREQUIS:
+       * - Un élément doit être sélectionné (selectedObjectCoords.value.show = true)
+       * - L'élément doit avoir des contrôles visibles (selectedObjectCoords.value.controls)
+       * - Le contrôle mtr doit exister (selectedObjectCoords.value.controls.mtr)
+       * - On ne doit pas avoir terminé une rotation récemment (protection anti-rebond)
+       * 
+       * ALGORITHME DE DÉTECTION:
+       * 1. Calculer le temps écoulé depuis la dernière rotation
+       * 2. Vérifier qu'un délai minimum s'est écoulé (100ms)
+       * 3. Récupérer les coordonnées du mtr et du curseur
+       * 4. Calculer la distance euclidienne entre les deux points
+       * 5. Si distance ≤ 10px, on considère que l'utilisateur clique sur le mtr
+       * 
+       * FORMULE DE DISTANCE:
+       * distance = √[(x₂-x₁)² + (y₂-y₁)²]
+       * où (x₁,y₁) = position du mtr
+       *     (x₂,y₂) = position du curseur
+       */
       
+      // Calculer le temps écoulé depuis la fin de la dernière rotation (en millisecondes)
+      // Cela permet d'éviter de détecter immédiatement une nouvelle rotation après la fin d'une rotation
+      const timeSinceRotationEnd = Date.now() - rotationEndTime
+      
+      // Délai minimum de protection entre deux rotations (en millisecondes)
+      // Ce délai évite les faux positifs lors du relâchement de la souris
+      const minTimeBetweenRotationAndDrag = 100 // 100ms = 0.1 seconde
+      
+      // Vérifier toutes les conditions pour détecter un clic sur le mtr:
+      // 1. rotationJustEnded = false (pas de rotation qui vient de se terminer)
+      // 2. timeSinceRotationEnd > 100ms (délai de protection écoulé)
+      // 3. selectedObjectCoords.value.show = true (un objet est sélectionné)
+      // 4. selectedObjectCoords.value.controls existe (l'objet a des contrôles)
+      // 5. selectedObjectCoords.value.controls.mtr existe (le contrôle mtr est présent)
       if (!rotationJustEnded && timeSinceRotationEnd > minTimeBetweenRotationAndDrag && 
           selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
+        
+        // Récupérer les coordonnées du contrôle mtr (en pixels sur le canvas 2D)
         const mtrX = selectedObjectCoords.value.controls.mtr.x
         const mtrY = selectedObjectCoords.value.controls.mtr.y
+        
+        // Récupérer les coordonnées du curseur (en pixels sur le canvas 2D)
         const cursorX = canvasCoords.x
         const cursorY = canvasCoords.y
         
-        // Calculer la distance entre le clic et le mtr
+        // Calculer la distance euclidienne entre le curseur et le mtr
+        // Formule: distance = √[(cursorX - mtrX)² + (cursorY - mtrY)²]
+        // Math.pow(x, 2) calcule x²
+        // Math.sqrt() calcule la racine carrée
         const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
         
         // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
+        // Si la distance est ≤ 10px, on considère que l'utilisateur clique sur le mtr
+        // Ce seuil permet une certaine tolérance pour faciliter le clic
         const clickThreshold = 10
         
+        // Si le curseur est suffisamment proche du mtr
         if (distance <= clickThreshold) {
-          // Activer le mode rotation
+          /**
+           * ACTIVATION DU MODE ROTATION
+           * 
+           * À ce stade, on a confirmé que l'utilisateur clique sur le mtr.
+           * On active le mode rotation et on enregistre les positions initiales.
+           */
+          
+          // Activer le flag de rotation
+          // true = une rotation est maintenant en cours
           isRotating3D = true
+          
+          // Désactiver le flag de protection
+          // false = on est en rotation active, pas en fin de rotation
           rotationJustEnded = false
+          
+          // Enregistrer la position du mtr comme point de référence
+          // Cette position ne changera pas pendant la rotation
           rotationStartPosition = { x: mtrX, y: mtrY }
+          
+          // Enregistrer la position initiale du curseur
+          // Cette position servira à calculer l'angle de rotation initial
           rotationStartCursor = { x: cursorX, y: cursorY }
           
-          // Empêcher les contrôles OrbitControls pendant l'interaction
-          if (controls) {
-            controls.enabled = false
+          /**
+           * CALCUL DU CENTRE GÉOMÉTRIQUE AU DÉBUT DE LA ROTATION
+           * 
+           * Le centre est calculé UNE SEULE FOIS ici et stocké dans rotationCenter.
+           * Il sera réutilisé pendant toute la durée de la rotation.
+           * Cela évite les problèmes de décalage causés par le recalcul du centre
+           * à chaque frame (car les coordonnées des contrôles changent pendant la rotation).
+           */
+          const controls = selectedObjectCoords.value.controls || {}
+          let centerX, centerY
+          
+          // MÉTHODE 1: Intersection des diagonales (méthode préférée)
+          if (controls.tl && controls.tr && controls.bl && controls.br) {
+            // Extraire les coordonnées des 4 coins
+            const x1 = controls.tl.x, y1 = controls.tl.y  // Top-left
+            const x2 = controls.br.x, y2 = controls.br.y  // Bottom-right
+            const x3 = controls.tr.x, y3 = controls.tr.y  // Top-right
+            const x4 = controls.bl.x, y4 = controls.bl.y  // Bottom-left
+            
+            // Calculer le dénominateur
+            const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            
+            if (Math.abs(denom) > 0.001) {
+              const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+              centerX = x1 + t * (x2 - x1)
+              centerY = y1 + t * (y2 - y1)
+            } else {
+              // Fallback: moyenne des 4 coins
+              centerX = (x1 + x2 + x3 + x4) / 4
+              centerY = (y1 + y2 + y3 + y4) / 4
+            }
+          } else {
+            // MÉTHODE 2: Calcul via left/top/width/height (fallback)
+            const originX = selectedObjectCoords.value.originX || 'left'
+            const originY = selectedObjectCoords.value.originY || 'top'
+            const objLeft = selectedObjectCoords.value.left || 0
+            const objTop = selectedObjectCoords.value.top || 0
+            const objWidth = selectedObjectCoords.value.width || 0
+            const objHeight = selectedObjectCoords.value.height || 0
+            
+            let actualLeft = objLeft
+            let actualTop = objTop
+            
+            if (originX === 'center') {
+              actualLeft = objLeft - objWidth / 2
+            } else if (originX === 'right') {
+              actualLeft = objLeft - objWidth
+            }
+            
+            if (originY === 'center') {
+              actualTop = objTop - objHeight / 2
+            } else if (originY === 'bottom') {
+              actualTop = objTop - objHeight
+            }
+            
+            centerX = actualLeft + objWidth / 2
+            centerY = actualTop + objHeight / 2
           }
+          
+          // Stocker le centre calculé pour toute la durée de la rotation
+          rotationCenter = { x: centerX, y: centerY }
+          
+          console.log('🎯 Centre géométrique calculé au début de la rotation:', rotationCenter)
+          
+          // Désactiver COMPLÈTEMENT les contrôles OrbitControls pendant la rotation
+          // Cela évite que la caméra/goblet ne tourne en même temps que l'objet
+          if (controls) {
+            controls.enabled = false        // Désactiver tous les contrôles
+            controls.enableRotate = false   // Désactiver spécifiquement la rotation
+            console.log('🔒 OrbitControls désactivés pendant la rotation')
+          }
+          
+          // Log de débogage pour vérifier les valeurs
           console.log('3d-rotation-start',canvasCoords.x,canvasCoords.y,selectedObjectCoords.value.controls.mtr,rotationStartCursor);
-          // Émettre un événement pour informer que la rotation commence
+          
+          // Émettre l'événement '3d-rotation-start' vers le composant parent
+          // Cet événement informe le parent (DesignStudio) qu'une rotation commence
+          // Le parent peut alors préparer l'objet Fabric.js pour la rotation
           emit('3d-rotation-start', {
-            canvasX: canvasCoords.x,
-            canvasY: canvasCoords.y,
-            mtrCoords: selectedObjectCoords.value.controls.mtr
+            canvasX: canvasCoords.x,      // Position X du curseur
+            canvasY: canvasCoords.y,      // Position Y du curseur
+            mtrCoords: selectedObjectCoords.value.controls.mtr  // Coordonnées du mtr
           })
           
+          // Arrêter le traitement ici et ne pas continuer avec le drag normal
+          // return empêche l'exécution du code de drag qui suit
           return // Ne pas continuer avec le drag normal
         }
       }
@@ -952,6 +1210,13 @@ const setupClickHandler = () => {
   }
   
   const onMouseMove = (event) => {
+    // BLOQUER OrbitControls pendant la rotation
+    // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
+    if (isRotating3D) {
+      event.stopPropagation()
+      event.preventDefault()
+    }
+    
     // Toujours calculer les coordonnées une seule fois
     const canvasCoords = getCanvasCoords(event)
     
@@ -1046,83 +1311,136 @@ const setupClickHandler = () => {
       return
     }
     
-    // Si on est en train de faire tourner depuis le mtr
-    if (isRotating3D && canvasCoords !== null && rotationStartPosition && rotationStartCursor && selectedObjectCoords.value.show) {
-      // Calculer l'angle de rotation basé sur le mouvement du curseur
-      // Utiliser le centre géométrique réel de l'objet (ne change pas avec la rotation)
-      // Le centre est calculé comme l'intersection des diagonales des 4 coins transformés
-      const controls = selectedObjectCoords.value.controls || {}
-      let centerX, centerY
+    /**
+     * ============================================================================
+     * CALCUL DE L'ANGLE DE ROTATION PENDANT LE MOUVEMENT
+     * ============================================================================
+     * 
+     * Cette section est exécutée pendant que l'utilisateur déplace la souris
+     * alors qu'une rotation est active (isRotating3D = true).
+     * 
+     * OBJECTIF:
+     * Calculer l'angle de rotation de l'objet en fonction du mouvement du curseur
+     * par rapport au centre géométrique de l'objet.
+     * 
+     * ALGORITHME EN 3 ÉTAPES:
+     * 1. Trouver le centre géométrique exact de l'objet (même après rotation)
+     * 2. Calculer les angles entre le centre et les positions du curseur (début et actuelle)
+     * 3. Calculer la différence d'angle et l'émettre au composant parent
+     * 
+     * PRÉREQUIS:
+     * - isRotating3D = true (rotation en cours)
+     * - canvasCoords !== null (curseur sur le modèle 3D)
+     * - rotationStartPosition !== null (position mtr enregistrée)
+     * - rotationStartCursor !== null (position initiale curseur enregistrée)
+     * - selectedObjectCoords.value.show = true (objet sélectionné)
+     */
+    if (isRotating3D && canvasCoords !== null && rotationStartPosition && rotationStartCursor && selectedObjectCoords.value.show && rotationCenter) {
+      /**
+       * ======================================================================
+       * ÉTAPE 1: UTILISATION DU CENTRE GÉOMÉTRIQUE PRÉ-CALCULÉ
+       * ======================================================================
+       * 
+       * Le centre géométrique a été calculé UNE SEULE FOIS au début de la rotation
+       * et stocké dans la variable rotationCenter.
+       * 
+       * On utilise directement ce centre pré-calculé au lieu de le recalculer
+       * à chaque frame. Cela évite les problèmes de décalage causés par le fait
+       * que les coordonnées des contrôles (tl, tr, bl, br) changent pendant la rotation.
+       * 
+       * AVANTAGES:
+       * - Performance: pas de recalcul à chaque frame
+       * - Précision: le centre reste fixe pendant toute la rotation
+       * - Stabilité: pas de décalage de position pendant la rotation
+       */
       
-      if (controls.tl && controls.tr && controls.bl && controls.br) {
-        // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
-        // Cela donne toujours le centre géométrique réel, même après rotation
-        const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
-        const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
-        const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
-        const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
-        
-        // Formule d'intersection de deux segments de ligne
-        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if (Math.abs(denom) > 0.001) {
-          const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-          centerX = x1 + t * (x2 - x1)
-          centerY = y1 + t * (y2 - y1)
-        } else {
-          // Fallback : moyenne des 4 coins si les diagonales sont parallèles
-          centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
-          centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
-        }
-      } else {
-        // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
-        const originX = selectedObjectCoords.value.originX || 'left'
-        const originY = selectedObjectCoords.value.originY || 'top'
-        const objLeft = selectedObjectCoords.value.left || 0
-        const objTop = selectedObjectCoords.value.top || 0
-        const objWidth = selectedObjectCoords.value.width || 0
-        const objHeight = selectedObjectCoords.value.height || 0
-        
-        let actualLeft = objLeft
-        let actualTop = objTop
-        
-        if (originX === 'center') {
-          actualLeft = objLeft - objWidth / 2
-        } else if (originX === 'right') {
-          actualLeft = objLeft - objWidth
-        }
-        
-        if (originY === 'center') {
-          actualTop = objTop - objHeight / 2
-        } else if (originY === 'bottom') {
-          actualTop = objTop - objHeight
-        }
-        
-        centerX = actualLeft + objWidth / 2
-        centerY = actualTop + objHeight / 2
-      }
+      // Utiliser le centre pré-calculé
+      const centerX = rotationCenter.x
+      const centerY = rotationCenter.y
       
-      // Calculer les angles relatifs au centre réel de l'objet
-      const startDx = rotationStartCursor.x - centerX
-      const startDy = rotationStartCursor.y - centerY
-      const currentDx = canvasCoords.x - centerX
-      const currentDy = canvasCoords.y - centerY
+      console.log('🎯 Utilisation du centre pré-calculé:', centerX, centerY)
       
-      // Calculer l'angle initial et l'angle actuel (en degrés)
+      /**
+       * ======================================================================
+       * ÉTAPE 2: CALCUL DES ANGLES
+       * ======================================================================
+       * 
+       * Maintenant qu'on a le centre, on calcule les angles entre:
+       * 1. Le centre et la position initiale du curseur (startAngle)
+       * 2. Le centre et la position actuelle du curseur (currentAngle)
+       * 
+       * FORMULE:
+       * angle = atan2(dy, dx) * (180 / π)
+       * 
+       * où:
+       * - dx = différence en X entre le curseur et le centre
+       * - dy = différence en Y entre le curseur et le centre
+       * - atan2 retourne l'angle en radians (entre -π et π)
+       * - On multiplie par (180/π) pour convertir en degrés
+       * 
+       * SYSTÈME DE COORDONNÉES:
+       *        0° (droite)
+       *           →
+       *     90°   ↓   -90°
+       *        180° (gauche)
+       */
+      
+      // Calculer le vecteur entre le centre et la position initiale du curseur
+      const startDx = rotationStartCursor.x - centerX  // Différence en X (début)
+      const startDy = rotationStartCursor.y - centerY  // Différence en Y (début)
+      
+      // Calculer le vecteur entre le centre et la position actuelle du curseur
+      const currentDx = canvasCoords.x - centerX  // Différence en X (actuel)
+      const currentDy = canvasCoords.y - centerY  // Différence en Y (actuel)
+      
+      // Calculer l'angle initial (en degrés)
+      // Math.atan2(y, x) retourne l'angle en radians entre -π et π
+      // On multiplie par (180 / Math.PI) pour convertir en degrés
       const startAngle = Math.atan2(startDy, startDx) * (180 / Math.PI)
+      
+      // Calculer l'angle actuel (en degrés)
       const currentAngle = Math.atan2(currentDy, currentDx) * (180 / Math.PI)
       
-      // Calculer la différence d'angle
+      /**
+       * ======================================================================
+       * ÉTAPE 3: CALCUL DE LA DIFFÉRENCE D'ANGLE (DELTA)
+       * ======================================================================
+       * 
+       * La différence d'angle (angleDelta) est la rotation à appliquer.
+       * 
+       * NORMALISATION:
+       * Les angles sont normalisés entre -180° et 180° pour éviter les sauts.
+       * Par exemple, si on passe de 170° à -170°, la différence est de 20°
+       * et non de -340°.
+       */
+      
+      // Calculer la différence d'angle (rotation à appliquer)
       let angleDelta = currentAngle - startAngle
       
-      // Normaliser l'angle entre -180 et 180
+      // Normaliser l'angle entre -180° et 180°
+      // Si l'angle est > 180°, on soustrait 360° (rotation dans l'autre sens)
       if (angleDelta > 180) angleDelta -= 360
+      // Si l'angle est < -180°, on ajoute 360° (rotation dans l'autre sens)
       if (angleDelta < -180) angleDelta += 360
-      // Émettre l'événement de rotation avec l'angle calculé
+      
+      /**
+       * ======================================================================
+       * ÉMISSION DE L'ÉVÉNEMENT DE ROTATION
+       * ======================================================================
+       * 
+       * On émet l'événement '3d-rotation' vers le composant parent avec:
+       * - canvasX, canvasY: position actuelle du curseur
+       * - angle: différence d'angle calculée (en degrés)
+       * - mtrCoords: position du contrôle mtr (pour référence)
+       * 
+       * Le composant parent (DesignStudio) reçoit cet événement et applique
+       * la rotation à l'objet Fabric.js correspondant.
+       */
       emit('3d-rotation', {
-        canvasX: canvasCoords.x,
-        canvasY: canvasCoords.y,
-        angle: angleDelta,
-        mtrCoords: rotationStartPosition
+        canvasX: canvasCoords.x,           // Position X actuelle du curseur
+        canvasY: canvasCoords.y,           // Position Y actuelle du curseur
+        angle: angleDelta,                 // Angle de rotation à appliquer (en degrés)
+        mtrCoords: rotationStartPosition   // Position du mtr (pour référence)
       })
     }
     
@@ -1156,6 +1474,7 @@ const setupClickHandler = () => {
       isRotating3D = false
       rotationStartPosition = null
       rotationStartCursor = null
+      rotationCenter = null  // Réinitialiser le centre calculé
       rotationJustEnded = true
       rotationEndTime = Date.now()
       
@@ -1165,9 +1484,11 @@ const setupClickHandler = () => {
         renderer.domElement.style.setProperty('cursor', defaultCursor, 'important')
       }
       
-      // Réactiver les contrôles OrbitControls
+      // Réactiver COMPLÈTEMENT les contrôles OrbitControls
       if (controls) {
-        controls.enabled = true
+        controls.enabled = true         // Réactiver tous les contrôles
+        controls.enableRotate = true    // Réactiver spécifiquement la rotation
+        console.log('🔓 OrbitControls réactivés après la rotation')
       }
       
       // Réinitialiser le flag après un délai
@@ -2991,8 +3312,10 @@ const startDecalRotation = async (objectProps, dataUrl) => {
     const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
     const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
     
-    const centerX = objectProps.left + objectProps.width / 2
-    const centerY = objectProps.top + objectProps.height / 2
+    // ✅ IMPORTANT: left et top sont maintenant le CENTRE de l'objet
+    // (pas le coin supérieur gauche)
+    const centerX = objectProps.left  // Déjà le centre X
+    const centerY = objectProps.top   // Déjà le centre Y
     
     const centerU = centerX / canvasWidth
     // Inversion Y standard pour les UVs
@@ -3026,10 +3349,61 @@ const endDecalRotation = () => {
   shaderUniforms.uDecalMap.value = null
 }
 
+/**
+ * ============================================================================
+ * FONCTION: handleAddRectangleClick
+ * ============================================================================
+ * 
+ * Gère le clic sur le bouton "+ Rectangle" dans la vue 3D.
+ * 
+ * FONCTIONNEMENT:
+ * - Si le mode placement de rectangle est déjà actif, on le désactive
+ * - Sinon, on émet un événement 'add-rectangle-click' vers le composant parent
+ *   pour activer le mode placement de rectangle
+ * 
+ * Le composant parent (DesignStudio.vue) recevra cet événement et:
+ * 1. Activera le mode placement dans FabricDesigner
+ * 2. Mettra à jour les props placementMode et placementType
+ * 3. L'utilisateur pourra alors cliquer sur le modèle 3D pour placer le rectangle
+ */
+const handleAddRectangleClick = () => {
+  // Si le mode placement de rectangle est déjà actif, le désactiver
+  if (props.placementMode && props.placementType === 'rectangle') {
+    emit('add-rectangle-click', { active: false })
+  } else {
+    // Sinon, activer le mode placement de rectangle
+    emit('add-rectangle-click', { active: true })
+  }
+}
+
+/**
+ * Désactiver OrbitControls (empêcher la rotation du goblet)
+ */
+const disableOrbitControls = () => {
+  if (controls) {
+    controls.enabled = false
+    controls.enableRotate = false
+    console.log('🔒 OrbitControls désactivés')
+  }
+}
+
+/**
+ * Réactiver OrbitControls (permettre la rotation du goblet)
+ */
+const enableOrbitControls = () => {
+  if (controls) {
+    controls.enabled = true
+    controls.enableRotate = true
+    console.log('🔓 OrbitControls réactivés')
+  }
+}
+
 defineExpose({
   startDecalRotation,
   updateDecalRotation,
   endDecalRotation,
+  disableOrbitControls,  // ✅ NOUVEAU
+  enableOrbitControls,   // ✅ NOUVEAU
   getCurrentMesh: () => currentMesh,
   applyTexture,
   getCanvasTexture: () => canvasTexture,
@@ -3072,6 +3446,97 @@ defineExpose({
   width: 100%;
   height: 100%;
   display: block;
+}
+
+/* Bouton flottant pour ajouter un rectangle */
+.add-rectangle-btn {
+  position: absolute;
+  bottom: 30px;
+  right: 30px;
+  z-index: 999;
+  
+  /* Style du bouton */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  
+  /* Couleurs */
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 50px;
+  
+  /* Typographie */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  
+  /* Effets */
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Empêcher la sélection du texte */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.add-rectangle-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.add-rectangle-btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 10px rgba(102, 126, 234, 0.4);
+}
+
+/* État actif (mode placement activé) */
+.add-rectangle-btn.active {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.add-rectangle-btn.active:hover {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.6);
+}
+
+/* Animation de pulsation pour l'état actif */
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 4px 25px rgba(16, 185, 129, 0.8);
+  }
+}
+
+.add-rectangle-btn .btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.add-rectangle-btn .btn-text {
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Responsive: réduire le bouton sur petits écrans */
+@media (max-width: 768px) {
+  .add-rectangle-btn {
+    padding: 10px 16px;
+    font-size: 12px;
+    bottom: 20px;
+    right: 20px;
+  }
+  
+  .add-rectangle-btn .btn-icon {
+    font-size: 16px;
+  }
 }
 
 .coordinates-display {

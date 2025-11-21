@@ -55,15 +55,46 @@
         <button @click="scaleDownModel" class="upload-btn" :disabled="!hasModel">
           🔽 Réduire modèle 20%
         </button>
+        <!-- Bouton pour activer/désactiver l'optimisation Decal -->
+        <button 
+          @click="useDecalOptimization = !useDecalOptimization" 
+          class="upload-btn"
+          :class="{ 'active': useDecalOptimization }"
+        >
+          {{ useDecalOptimization ? '⚡ Decal ON' : '🐢 Decal OFF' }}
+        </button>
       </div>
     </div>
 
+
     <div class="studio-content">
-      <!-- Vue 3D - Prend 100% de l'écran quand active -->
-      <!-- Utiliser v-show au lieu de v-if pour préserver les éléments -->
-      <div v-show="currentView === '3d'" class="view-panel view-3d">
-        <ThreeScene
-          ref="threeSceneRef"
+      <!-- Vue 3D - Toujours visible en haut -->
+      <div class="view-panel view-3d">
+        <div class="panel-header">
+          <h3>🎯 Vue 3D - Modèle</h3>
+        </div>
+        
+        <!-- Affichage du tempCanvas pour débogage -->
+        <div class="temp-canvas-preview">
+           <div class="debug-rotation-preview">
+      </div>
+      image
+        <img :src="tempCanvasDataUrl" alt="Debug Preview" />
+
+          <div class="temp-canvas-header">
+            📸 TempCanvas (Decal) - Anglee: {{ tempCanvasAngle.toFixed(1) }}°
+          </div>
+          <img :src="tempCanvasDataUrl" alt="TempCanvas" />
+        </div>
+       <!-- DÉBOGAGE: Visualisation de l'image envoyée au shader -->
+      <div v-if="true" class="debug-rotation-preview">
+        <div class="debug-header">Preview Shader ({{ Math.round(tempCanvasAngle) }}°)</div>
+        <img :src="tempCanvasDataUrl" alt="Debug Preview" />
+      </div>
+
+      <!-- Canvas 3D -->
+      <ThreeScene 
+        ref="threeSceneRef"
           :model-url="uploadedModel"
           :texture="appliedTexture"
           :canvas2D="fabricCanvasElement"
@@ -91,14 +122,14 @@
           @3d-resize="on3DResize"
           @3d-resize-end="on3DResizeEnd"
           @3d-hover="on3DHover"
+          @add-rectangle-click="onAddRectangleClick"
         />
       </div>
 
-      <!-- Vue 2D - Prend 100% de l'écran quand active -->
-      <!-- Utiliser v-show au lieu de v-if pour préserver les éléments -->
-      <div v-show="currentView === '2d'" class="view-panel view-2d">
+      <!-- Vue 2D - Toujours visible en bas -->
+      <div class="view-panel view-2d">
         <div class="panel-header">
-          <h3>Canvas de Design 2D</h3>
+          <h3>🎨 Vue 2D - Canvas de Design</h3>
         </div>
         
         <!-- Contrôles de zone de travail -->
@@ -349,6 +380,9 @@ watch([gobletHeightCm, customizableHeightCm, customizablePosition], () => {
 const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
 const placementType = ref(null)   // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
 const dragMode = ref(false)       // Mode drag actif pour déplacer un objet sélectionné
+const useDecalOptimization = ref(true)  // Activer/désactiver l'optimisation Decal pour la rotation
+const tempCanvasDataUrl = ref(null)  // URL de l'image du tempCanvas pour débogage
+const tempCanvasAngle = ref(0)  // Angle actuel de l'objet
 const isDragging = ref(false)    // Indique si on est en train de glisser un objet
 
 // ===== COMPUTED PROPERTIES (Propriétés calculées) =====
@@ -702,29 +736,70 @@ const on3DRotationStart = (rotationData) => {
     fabricDesignerRef.value.activateRotationMode(activeObject, rotationData.mtrCoords)
   }
 
-  // OPTIMISATION DECAL: Démarrer la rotation via Decal
-  if (threeSceneRef.value && threeSceneRef.value.startDecalRotation) {
-    // Générer l'image de l'objet pour le decal
-    // Utiliser toDataURL avec un multiplicateur pour une meilleure qualité
+  // 🔒 DÉSACTIVER OrbitControls pour empêcher la rotation du goblet
+  if (threeSceneRef.value && threeSceneRef.value.disableOrbitControls) {
+    threeSceneRef.value.disableOrbitControls()
+    console.log('🔒 OrbitControls désactivés depuis DesignStudio')
+  }
+
+  // OPTIMISATION DECAL: Démarrer la rotation via Decal (seulement si activé)
+  if (useDecalOptimization.value && threeSceneRef.value && threeSceneRef.value.startDecalRotation) {
+    console.log('⚡ Utilisation de l\'optimisation Decal - Version directe sans tempCanvas')
+    
+    // 1️⃣ Récupérer l'angle actuel et les propriétés
+    const currentAngle = activeObject.angle || 0
+    
+    // 🔒 Mettre temporairement l'objet à plat (0°) pour la capture
+    // Cela assure que l'image générée colle exactement aux dimensions de l'objet
+    // sans marges vides dues à la rotation, évitant ainsi l'écrasement/déformation dans le shader
+    activeObject.set('angle', 0)
+    activeObject.setCoords() // Important pour recalculer les dimensions à plat
+    
+    // 2️⃣ Dimensions de l'objet (à plat)
+    const objWidth = activeObject.getScaledWidth()
+    const objHeight = activeObject.getScaledHeight()
+    const zoom = 4  // Zoom suffisant (trop haut peut causer des lags)
+    
+    // 3️⃣ Générer l'image de l'objet "à plat"
     const dataUrl = activeObject.toDataURL({
       format: 'png',
-      multiplier: 2
+      multiplier: zoom,
+      enableRetinaScaling: true,
+      withoutBorders: true,
+      withoutControls: true
     })
     
-    // Démarrer le decal
-    threeSceneRef.value.startDecalRotation({
-      left: activeObject.left,
-      top: activeObject.top,
-      width: activeObject.getScaledWidth(),
-      height: activeObject.getScaledHeight(),
-      angle: activeObject.angle || 0
-    }, dataUrl)
+    // 🔓 Restaurer l'angle d'origine immédiatement
+    activeObject.set('angle', currentAngle)
+    activeObject.setCoords()
     
-    // Cacher l'objet 2D temporairement
-    activeObject.set('opacity', 0)
+    // 4️⃣ Stocker pour affichage de débogage
+    tempCanvasDataUrl.value = dataUrl
+    // tempCanvasAngle.value = currentAngle
+    
+    // 5️⃣ Calculer le centre de l'objet pour un positionnement précis
+    const center = activeObject.getCenterPoint()
+    
+    // 6️⃣ Démarrer le decal avec l'image "droite"
+    // Le shader va maintenant appliquer la rotation proprement sur cette image parfaite
+    threeSceneRef.value.startDecalRotation({
+      left: center.x,
+      top: center.y,
+      width: objWidth,
+      height: objHeight,
+      angle: -(currentAngle)  // ✅ Inverser l'angle pour corriger le sens
+    }, dataUrl)
+
+    
+    // 7️⃣ Cacher l'objet 2D ET ses contrôles
+    activeObject.set({
+      opacity: 0,           // Cacher l'objet
+      hasControls: false,   // Cacher les contrôles (coins, mtr, etc.)
+      hasBorders: false     // Cacher la bordure de sélection
+    })
     canvas.renderAll()
-  }
-}
+  }  // Fin de if (threeSceneRef.value && ...)
+}  // Fin de on3DRotationStart
 
 /**
  * Gère la rotation en cours depuis le contrôle de rotation (mtr) dans la vue 3D
@@ -744,9 +819,10 @@ const on3DRotation = (rotationData) => {
   const newAngle = rotationInitialAngle + rotationData.angle
   lastRotationAngle = newAngle // Sauvegarder pour la fin
   
-  // OPTIMISATION DECAL: Mettre à jour seulement le decal 3D
-  if (threeSceneRef.value && threeSceneRef.value.updateDecalRotation) {
-    threeSceneRef.value.updateDecalRotation(newAngle)
+  // OPTIMISATION DECAL: Mettre à jour seulement le decal 3D (si activé)
+  if (useDecalOptimization.value && threeSceneRef.value && threeSceneRef.value.updateDecalRotation) {
+    // ✅ IMPORTANT: Inverser l'angle pour que le Decal tourne dans le bon sens
+    threeSceneRef.value.updateDecalRotation(-newAngle)
     
     // Log pour montrer l'économie de performance
     skipped2DFrames++
@@ -805,9 +881,20 @@ const on3DRotation = (rotationData) => {
  * Gère la fin de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
  */
 const on3DRotationEnd = () => {
-  // OPTIMISATION DECAL: Terminer la rotation et appliquer le résultat final
-  if (threeSceneRef.value && threeSceneRef.value.endDecalRotation) {
+  // OPTIMISATION DECAL: Terminer la rotation et appliquer le résultat final (si activé)
+  if (useDecalOptimization.value && threeSceneRef.value && threeSceneRef.value.endDecalRotation) {
     threeSceneRef.value.endDecalRotation()
+    console.log('⚡ Fin de l\'optimisation Decal')
+    
+    // Réinitialiser l'affichage du tempCanvas
+    tempCanvasDataUrl.value = null
+    tempCanvasAngle.value = 0
+  }
+
+  // 🔓 RÉACTIVER OrbitControls pour permettre la rotation du goblet
+  if (threeSceneRef.value && threeSceneRef.value.enableOrbitControls) {
+    threeSceneRef.value.enableOrbitControls()
+    console.log('🔓 OrbitControls réactivés depuis DesignStudio')
   }
 
   if (!fabricDesignerRef.value) {
@@ -823,8 +910,12 @@ const on3DRotationEnd = () => {
   
   const activeObject = canvas.getActiveObject()
   if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
-    // Restaurer l'opacité
-    activeObject.set('opacity', 1)
+    // Restaurer l'opacité ET les contrôles
+    activeObject.set({
+      opacity: 1,          // Réafficher l'objet
+      hasControls: true,   // Réafficher les contrôles
+      hasBorders: true     // Réafficher la bordure
+    })
     
     // Appliquer la rotation finale stockée dans lastRotationAngle
     // Si lastRotationAngle est 0 (pas de mouvement), on garde l'angle actuel
@@ -907,6 +998,47 @@ const onPlacementModeChanged = (modeData) => {
   // Mettre à jour le curseur du modèle 3D si nécessaire
   if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
     threeSceneRef.value.setPlacementMode(modeData.active, modeData.type)
+  }
+}
+
+/**
+ * Gère le clic sur le bouton "+ Rectangle" dans la vue 3D
+ * 
+ * Cette fonction active ou désactive le mode placement de rectangle.
+ * Quand le mode est actif, l'utilisateur peut cliquer sur le modèle 3D
+ * pour placer un rectangle à la position cliquée.
+ * 
+ * @param {Object} data - Données de l'événement { active: boolean }
+ */
+const onAddRectangleClick = (data) => {
+  if (data.active) {
+    // Activer le mode placement de rectangle
+    placementMode.value = true
+    placementType.value = 'rectangle'
+    
+    // Informer FabricDesigner du changement de mode
+    if (fabricDesignerRef.value && fabricDesignerRef.value.activatePlacementMode) {
+      fabricDesignerRef.value.activatePlacementMode('rectangle')
+    }
+    
+    // Mettre à jour le mode dans ThreeScene
+    if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
+      threeSceneRef.value.setPlacementMode(true, 'rectangle')
+    }
+  } else {
+    // Désactiver le mode placement
+    placementMode.value = false
+    placementType.value = null
+    
+    // Informer FabricDesigner de la désactivation
+    if (fabricDesignerRef.value && fabricDesignerRef.value.deactivatePlacementMode) {
+      fabricDesignerRef.value.deactivatePlacementMode()
+    }
+    
+    // Mettre à jour le mode dans ThreeScene
+    if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
+      threeSceneRef.value.setPlacementMode(false, null)
+    }
   }
 }
 
@@ -1172,9 +1304,10 @@ const on3DHover = (hoverData) => {
   // Si aucun objet n'est sélectionné ou si dragMode n'est pas actif, réinitialiser
   if (!activeObject || !dragMode.value) {
     // Réinitialiser le style
-    if (fabricDesignerRef.value.resetResizeHover) {
-      fabricDesignerRef.value.resetResizeHover()
-    }
+    // DÉSACTIVÉ: Pas besoin si highlightResizeHandle est désactivé
+    // if (fabricDesignerRef.value.resetResizeHover) {
+    //   fabricDesignerRef.value.resetResizeHover()
+    // }
     currentHoveredHandle.value = null
     
     // Réinitialiser le flag de rotation
@@ -1286,9 +1419,10 @@ const on3DHover = (hoverData) => {
         currentHoveredHandle.value = handleInfo
         
         // Mettre en évidence le handle
-        if (fabricDesignerRef.value.highlightResizeHandle) {
-          fabricDesignerRef.value.highlightResizeHandle(activeObject, handleInfo)
-        }
+        // DÉSACTIVÉ: Contour mauve supprimé
+        // if (fabricDesignerRef.value.highlightResizeHandle) {
+        //   fabricDesignerRef.value.highlightResizeHandle(activeObject, handleInfo)
+        // }
       }
       
       // Changer le curseur selon le type de handle
@@ -1353,10 +1487,11 @@ const on3DHover = (hoverData) => {
       // Plus de handle survolé, réinitialiser le style
       if (currentHoveredHandle.value) {
         currentHoveredHandle.value = null
-        if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
-          fabricDesignerRef.value.resetResizeHover()
+        // DÉSACTIVÉ: Pas besoin si highlightResizeHandle est désactivé
+        // if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
+        //   fabricDesignerRef.value.resetResizeHover()
+        // }
         }
-      }
       
       // Réinitialiser l'état de débogage
       if (threeSceneRef.value && threeSceneRef.value.setDetectedControl) {
@@ -1707,6 +1842,16 @@ onMounted(async () => {
   background: #4338ca;
 }
 
+/* Style pour le bouton Decal actif */
+.upload-btn.active {
+  background: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.upload-btn.active:hover {
+  background: #059669;
+}
+
 .view-toggle-btn {
   padding: 8px 16px;
   background: #10b981;
@@ -1794,24 +1939,25 @@ onMounted(async () => {
 .studio-content {
   flex: 1;
   display: flex;
+  flex-direction: column; /* Afficher les vues l'une sous l'autre */
   position: relative;
   overflow: hidden;
+  gap: 0; /* Pas d'espace entre les vues */
 }
 
-/* ===== VUES EN PLEIN ÉCRAN ===== */
+/* ===== VUES EN MODE SPLIT (une sous l'autre) ===== */
 .view-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative; /* Changé de absolute à relative */
   width: 100%;
-  height: 100%;
+  height: 50%; /* Chaque vue prend 50% de la hauteur */
   display: flex;
   flex-direction: column;
-  transition: opacity 0.3s ease, visibility 0.3s ease;
+  border-bottom: 2px solid #e5e7eb;
 }
 
-/* Cacher la vue inactive avec v-show */
-/* Note: v-show utilise display: none, donc les éléments restent dans le DOM */
+.view-panel:last-child {
+  border-bottom: none; /* Pas de bordure pour la dernière vue */
+}
 
 .view-3d {
   background: #1a1a1a;
@@ -1820,8 +1966,62 @@ onMounted(async () => {
 
 .view-2d {
   background: white;
-  z-index: 2;
+  z-index: 1; /* Même z-index car elles ne se chevauchent plus */
   overflow: hidden;
+}
+
+/* Headers des panneaux */
+.view-panel .panel-header {
+  flex-shrink: 0;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.view-3d .panel-header {
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view-panel .panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.view-3d .panel-header h3 {
+  color: #fff;
+}
+
+/* Prévisualisation du tempCanvas */
+.temp-canvas-preview {
+  position: absolute;
+  top: 60px;
+  right: 330px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 2px solid #10b981;
+  border-radius: 8px;
+  padding: 10px;
+  z-index: 1000;
+  max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.temp-canvas-header {
+  color: #10b981;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.temp-canvas-preview img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .view-2d .panel-header {
@@ -2060,6 +2260,42 @@ onMounted(async () => {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+.debug-rotation-preview {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: white;
+  border: 2px solid #178efa;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  z-index: 9999;
+  max-width: 300px;
+}
+
+.debug-header {
+  font-size: 12px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 5px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+}
+
+.debug-rotation-preview img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid #eee;
+  background-image: linear-gradient(45deg, #ccc 25%, transparent 25%), 
+                    linear-gradient(-45deg, #ccc 25%, transparent 25%), 
+                    linear-gradient(45deg, transparent 75%, #ccc 75%), 
+                    linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
 }
 </style>
 

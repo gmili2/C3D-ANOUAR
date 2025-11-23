@@ -383,7 +383,8 @@ const emit = defineEmits([
   '3d-rotation-start',  // Début de la rotation depuis le mtr
   '3d-rotation',        // Rotation en cours depuis le mtr
   '3d-rotation-end',    // Fin de la rotation depuis le mtr
-  'add-rectangle-click' // Clic sur le bouton "+ Rectangle" dans la vue 3D
+  'add-rectangle-click', // Clic sur le bouton "+ Rectangle" dans la vue 3D
+  'detect-resize-handle' // Demande de détection d'un handle de resize
 ])
 
 // ============================================================================
@@ -1193,14 +1194,59 @@ const setupClickHandler = () => {
         }
       }
       
-      // Émettre l'événement pour que le parent détermine si c'est un resize ou un drag
-      // On ne met pas isDragging3D à true tout de suite, on attend la réponse du parent
-      emit('3d-drag-start', {
-        canvasX: canvasCoords.x,
-        canvasY: canvasCoords.y
-      })
+      // ========================================================================
+      // DÉTECTION DIRECTE: RESIZE OU DRAG ?
+      // ========================================================================
+      // Au lieu d'émettre un événement générique et d'attendre la réponse du parent,
+      // on détecte directement ici si l'utilisateur clique sur un handle de resize
+      // ou sur l'objet lui-même pour le déplacer.
       
-      // On initialise la position mais on n'active pas le drag tout de suite
+      // Vérifier si on clique sur un handle de resize
+      let isResizeClick = false
+      let handleInfo = null
+      
+      // Demander au parent (via emit) de détecter le handle
+      // On émet un événement synchrone pour obtenir la réponse
+      const detectResizeResult = { isResize: false, handleInfo: null }
+      emit('detect-resize-handle', {
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y,
+        result: detectResizeResult
+      })
+      if (detectResizeResult.isResize && detectResizeResult.handleInfo) {
+        // C'EST UN RESIZE
+        isResizeClick = true
+        handleInfo = detectResizeResult.handleInfo
+        
+        // Activer le mode resize
+        isResizing3D = true
+        isDragging3D = false
+        resizeStartPosition = { x: canvasCoords.x, y: canvasCoords.y }
+        resizeHandleInfo = handleInfo
+        
+        // Émettre l'événement de début de resize
+        emit('3d-resize-start', {
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y,
+          handleInfo: handleInfo
+        })
+        
+        console.log('🔧 Mode RESIZE activé', handleInfo)
+      } else {
+        // C'EST UN DRAG (déplacement)
+        isDragging3D = true
+        isResizing3D = false
+        
+        // Émettre l'événement de début de drag
+        emit('3d-drag-start', {
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y
+        })
+        
+        console.log('✋ Mode DRAG activé')
+      }
+      
+      // Initialiser la position de référence
       lastDragPosition = canvasCoords
       
       // Empêcher les contrôles OrbitControls pendant l'interaction

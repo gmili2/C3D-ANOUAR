@@ -212,6 +212,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern, ActiveSelection } from 'fabric'
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
+import { log } from 'three'
 
 // ===== ÉVÉNEMENTS ÉMIS =====
 const emit = defineEmits([
@@ -1341,8 +1342,9 @@ const initCanvas = () => {
     // Écouter quand un objet est sélectionné pour activer le mode drag sur 3D
     // Mettre à jour la liste quand un objet est sélectionné
     canvas.on('selection:created', (e) => {
-      updateObjectsList2D()
-      updateHasSelection() // Mettre à jour hasSelection
+      // alert('selection:created')
+      // updateObjectsList2D()
+      // updateHasSelection() // Mettre à jour hasSelection
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
         // Mettre à jour l'angle de rotation dans l'input
@@ -1739,11 +1741,6 @@ const initCanvas = () => {
         const handleInfo = detectResizeHandle(activeObject, x, y, 10)
         
         if (handleInfo) {
-          // Alert ok si un contrôle est détecté (et qu'il ne l'était pas déjà pour éviter le spam)
-          if (!detectedControl2D.value.show) {
-            alert('ok')
-          }
-
           // Calculer les coordonnées des contrôles
           const controls = calculateControlCoordinates2D(activeObject)
           const controlKey = handleInfo.handle
@@ -3497,7 +3494,7 @@ const selectObjectAtPosition = (x, y) => {
  */
 const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) => {
   if (!canvas) return
-  
+  console.log('resizeSelectedObjectFromHandle')
   const activeObject = canvas.getActiveObject()
   if (!activeObject || activeObject.userData?.isWorkZoneIndicator) {
     return
@@ -3530,7 +3527,6 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   const angle = (activeObject.angle || 0) * Math.PI / 180
   const cosAngle = Math.cos(-angle) // Angle négatif pour la transformation inverse
   const sinAngle = Math.sin(-angle)
-  
   // Calculer les différences de position depuis le début du resize
   const deltaX = x - startX
   const deltaY = y - startY
@@ -3544,7 +3540,6 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   let newScaleY = initialScale.scaleY
   let newLeft = initialScale.left
   let newTop = initialScale.top
-  
   // Calculer le nouveau scale et position selon le handle
   // Utiliser les deltas locaux pour un redimensionnement correct après rotation
   if (handleInfo.corner) {
@@ -3587,8 +3582,9 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
       // Garder la position et le scale X inchangés
     } else if (handleInfo.edge === 'top') {
       newScaleY = (initialHeight - localDeltaY) / originalHeight
+    console.log('newScaleY', newScaleY, 'newTop', newTop,'initialHeight', initialHeight,'localDeltaY', localDeltaY,'originalHeight', originalHeight,'initialScale.top', initialScale.top,'deltaY', deltaY)
       // Transformer le déplacement dans le système global pour la position
-      newTop = initialScale.top + deltaY
+      newTop = (initialScale.top + deltaY)
     }
   }
   
@@ -3596,13 +3592,46 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   newScaleX = Math.max(0.1, Math.min(10, newScaleX))
   newScaleY = Math.max(0.1, Math.min(10, newScaleY))
   
+  // ========================================================================
+  // MAINTENIR LE CENTRE FIXE PENDANT LE RESIZE
+  // ========================================================================
+  
+  // Obtenir le vrai centre de l'objet (tient compte de originX/originY)
+  const centerPoint = activeObject.getCenterPoint()
+  const oldCenterX = centerPoint.x
+  const oldCenterY = centerPoint.y
+  
+  console.log('🎯 Maintien du centre fixe:')
+  console.log('  Centre actuel (getCenterPoint):', oldCenterX, oldCenterY)
+  console.log('  Origin:', activeObject.originX, activeObject.originY)
+  console.log('  Ancien scale:', initialScale.scaleX, initialScale.scaleY)
+  console.log('  Nouveau scale:', newScaleX, newScaleY)
+  console.log('  Ancienne position:', initialScale.left, initialScale.top)
+  
   // Appliquer les transformations
   activeObject.set({
     scaleX: newScaleX,
-    scaleY: newScaleY,
-    left: newLeft,
-    top: newTop
+    scaleY: newScaleY
   })
+  
+  // Recalculer left/top pour que le centre reste au même endroit
+  // Fabric.js utilise getCenterPoint() qui tient compte de originX/originY
+  const newCenterPoint = activeObject.getCenterPoint()
+  
+  // Calculer le décalage du centre
+  const centerDeltaX = newCenterPoint.x - oldCenterX
+  const centerDeltaY = newCenterPoint.y - oldCenterY
+  
+  // Ajuster left/top pour compenser le décalage
+  activeObject.set({
+    left: activeObject.left - centerDeltaX,
+    top: activeObject.top - centerDeltaY
+  })
+  
+  const finalCenterPoint = activeObject.getCenterPoint()
+  console.log('  Nouvelle position:', activeObject.left, activeObject.top)
+  console.log('  Nouveau centre (getCenterPoint):', finalCenterPoint.x, finalCenterPoint.y)
+  console.log('  Décalage du centre:', centerDeltaX, centerDeltaY)
   
   // Pour les cercles, ajuster aussi le radius
   if (activeObject.type === 'circle' && activeObject.radius) {

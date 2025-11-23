@@ -75,7 +75,7 @@
         </div>
         
         <!-- Affichage du tempCanvas pour débogage -->
-        <div class="temp-canvas-preview">
+        <!-- <div class="temp-canvas-preview">
            <div class="debug-rotation-preview">
       </div>
       image
@@ -85,7 +85,7 @@
             📸 TempCanvas (Decal) - Anglee: {{ tempCanvasAngle.toFixed(1) }}°
           </div>
           <img :src="tempCanvasDataUrl" alt="TempCanvas" />
-        </div>
+        </div> -->
        <!-- DÉBOGAGE: Visualisation de l'image envoyée au shader -->
       <div v-if="true" class="debug-rotation-preview">
         <div class="debug-header">Preview Shader ({{ Math.round(tempCanvasAngle) }}°)</div>
@@ -123,6 +123,7 @@
           @3d-resize-end="on3DResizeEnd"
           @3d-hover="on3DHover"
           @add-rectangle-click="onAddRectangleClick"
+          @detect-resize-handle="onDetectResizeHandle"
         />
       </div>
 
@@ -1161,6 +1162,38 @@ const onObjectRotated = (data) => {
   }
 }
 
+/**
+ * Détecte si le clic est sur un handle de resize
+ * Cette fonction est appelée de manière synchrone par ThreeScene
+ * 
+ * @param {Object} data - Données contenant canvasX, canvasY, et result
+ */
+const onDetectResizeHandle = (data) => {
+  if (!fabricDesignerRef.value || !fabricDesignerRef.value.getCanvas) {
+    return
+  }
+  
+  const canvas = fabricDesignerRef.value.getCanvas()
+  const activeObject = canvas?.getActiveObject()
+  
+  if (!activeObject || !fabricDesignerRef.value.detectResizeHandle) {
+    return
+  }
+  
+  const handleInfo = fabricDesignerRef.value.detectResizeHandle(
+    activeObject,
+    data.canvasX,
+    data.canvasY
+  )
+  
+  if (handleInfo) {
+    // Modifier l'objet result pour indiquer qu'on a détecté un handle
+    data.result.isResize = true
+    data.result.handleInfo = handleInfo
+    console.log('🔍 Handle de resize détecté:', handleInfo)
+  }
+}
+
 // Variables pour le redimensionnement
 const isResizing = ref(false)
 const resizeStartPos = ref({ x: 0, y: 0 })
@@ -1173,6 +1206,14 @@ const isRotating = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
 const dragOffset = ref({ x: 0, y: 0 })
 
+/**
+ * Gère le début du glissement (drag) sur le modèle 3D
+ * 
+ * Cette fonction est appelée quand ThreeScene a déterminé que c'est un drag (déplacement)
+ * et non un resize. La détection est faite en amont par ThreeScene via onDetectResizeHandle.
+ * 
+ * @param {Object} clickData - Données du clic contenant canvasX, canvasY
+ */
 const on3DDragStart = (clickData) => {
   if (!dragMode.value) return
   
@@ -1182,46 +1223,11 @@ const on3DDragStart = (clickData) => {
     return
   }
   
-  // Vérifier si on est près d'un bord pour redimensionner
-  if (fabricDesignerRef.value && fabricDesignerRef.value.getCanvas) {
-    const canvas = fabricDesignerRef.value.getCanvas()
-    const activeObject = canvas?.getActiveObject()
-    
-    if (activeObject && fabricDesignerRef.value.detectResizeHandle) {
-      const handleInfo = fabricDesignerRef.value.detectResizeHandle(
-        activeObject,
-        clickData.canvasX,
-        clickData.canvasY
-      )
-      
-      if (handleInfo) {
-        // Commencer le redimensionnement
-        isResizing.value = true
-        isDragging.value = false // Désactiver le drag
-        resizeStartPos.value = { x: clickData.canvasX, y: clickData.canvasY }
-        currentResizeHandle.value = handleInfo
-        
-        // Notifier ThreeScene qu'on est en mode resize
-        if (threeSceneRef.value && threeSceneRef.value.setResizing) {
-          threeSceneRef.value.setResizing(true, {
-            x: clickData.canvasX,
-            y: clickData.canvasY
-          }, handleInfo)
-        }
-        
-        // Activer le flag de drag dans ThreeScene pour que onMouseMove fonctionne
-        if (threeSceneRef.value && threeSceneRef.value.setDragState) {
-          threeSceneRef.value.setDragState(true)
-        }
-        
-        return
-      }
-    }
-  }
-  
-  // Sinon, c'est un déplacement normal
+  // C'est un déplacement normal (le resize a déjà été détecté par ThreeScene)
   isDragging.value = true
   isResizing.value = false
+  
+  console.log('✋ Début du DRAG (déplacement)')
   
   // Calculer le décalage entre le point de clic et la position actuelle de l'objet
   if (fabricDesignerRef.value && fabricDesignerRef.value.getCanvas) {
@@ -1513,12 +1519,18 @@ const on3DHover = (hoverData) => {
 /**
  * Gère le début du redimensionnement depuis le modèle 3D
  * 
+ * Cette fonction est appelée quand ThreeScene a déterminé que c'est un resize.
+ * La détection du handle est faite en amont par ThreeScene via onDetectResizeHandle.
+ * 
  * @param {Object} resizeData - Données contenant canvasX, canvasY, handleInfo
  */
 const on3DResizeStart = (resizeData) => {
   isResizing.value = true
+  isDragging.value = false
   resizeStartPos.value = { x: resizeData.canvasX, y: resizeData.canvasY }
   currentResizeHandle.value = resizeData.handleInfo
+  
+  console.log('🔧 Début du RESIZE', resizeData.handleInfo)
 }
 
 /**

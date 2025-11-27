@@ -11,8 +11,19 @@
 -->
 <template>
   <div class="three-scene-container">
-    <!-- Canvas WebGL pour le rendu 3D -->
-    <canvas ref="canvasElement" class="three-canvas"></canvas>
+    <!-- TresCanvas pour le rendu 3D -->
+    <TresCanvas
+      ref="tresCanvasRef"
+      clear-color="#f4e8d8"
+      class="three-canvas"
+      @ready="onTresReady"
+    >
+      <!-- Les lumières et la caméra seront créées manuellement dans onTresReady -->
+      <!-- pour éviter les problèmes d'auto-importation -->
+    </TresCanvas>
+    
+    <!-- Canvas caché pour compatibilité avec le code existant -->
+    <canvas ref="canvasElement" class="three-canvas-hidden" style="display: none;"></canvas>
     
     <!-- Bouton flottant pour ajouter un rectangle -->
     <button 
@@ -308,7 +319,7 @@
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
@@ -318,6 +329,8 @@ import TextureUpdater from './TextureUpdater.vue'
 import { log } from 'three'
 // DecalGeometry supprimé pour utiliser les Shaders
 import { get3DPositionFromUV } from '../composables/use2DTo3DProjection'
+// TresJS imports - Seul TresCanvas est utilisé, le reste est créé manuellement
+import { TresCanvas } from '@tresjs/core'
 
 // ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
@@ -402,16 +415,18 @@ let environmentMap = null    // Texture d'environnement pour les réflexions
 let canvasTexture = null     // Texture partagée du canvas 2D (Fabric.js)
 
 // ----- Références Vue -----
-const canvasElement = ref(null)      // Référence au canvas HTML
+const canvasElement = ref(null)      // Référence au canvas HTML (pour compatibilité)
+const tresCanvasRef = ref(null)       // Référence au TresCanvas
 const textureUpdaterRef = ref(null)  // Référence au composant TextureUpdater
 
 // ----- Variables Three.js -----
-let scene = null          // Scène Three.js
-let camera = null         // Caméra perspective
-let renderer = null       // Rendu WebGL
-let controls = null       // Contrôles OrbitControls (rotation, zoom, pan)
+let scene = null          // Scène Three.js (obtenue depuis TresCanvas)
+let camera = null         // Caméra perspective (obtenue depuis TresCanvas)
+let renderer = null       // Rendu WebGL (obtenu depuis TresCanvas)
+let controls = null       // Contrôles OrbitControls (obtenu depuis TresCanvas)
 let animationId = null   // ID de l'animation frame pour cleanup
 let handleResize = null   // Handler pour le redimensionnement
+let tresContext = null   // Contexte TresJS
 
 // ----- Shaders (Optimisation Rotation Pro) -----
 // On stocke les références aux uniforms pour pouvoir les mettre à jour rapidement
@@ -575,19 +590,20 @@ const loadEnvironmentMap = async (url = null) => {
 
 onMounted(async () => {
   await nextTick()
-  initScene()
+  // initScene() n'est plus appelé ici car TresCanvas gère l'initialisation
+  // On attendra que onTresReady soit appelé
   
-  // Charger la texture d'environnement
-  await loadEnvironmentMap()
+  // Charger la texture d'environnement (sera appelé après que TresCanvas soit prêt)
+  // await loadEnvironmentMap()
   
-  // Si un canvas 2D est fourni, configurer la texture partagée
-  if (props.canvas2D) {
-    setupSharedCanvasTexture(props.canvas2D)
-  }
+  // Si un canvas 2D est fourni, configurer la texture partagée (sera fait après TresCanvas ready)
+  // if (props.canvas2D) {
+  //   setupSharedCanvasTexture(props.canvas2D)
+  // }
   
-  if (props.modelUrl) {
-    loadModel(props.modelUrl)
-  }
+  // if (props.modelUrl) {
+  //   loadModel(props.modelUrl)
+  // }
 })
 
 // Watch pour mettre à jour les coordonnées de l'objet sélectionné
@@ -628,63 +644,105 @@ watch(() => props.texture, (newTexture) => {
 })
 
 /**
- * Initialise la scène Three.js
- * 
- * Crée la scène, la caméra, le renderer, les lumières et les contrôles.
- * Configure également la boucle d'animation pour le rendu continu.
+ * Callback appelé quand TresCanvas est prêt
+ * Récupère les références à scene, camera, renderer depuis TresCanvas
  */
-const initScene = () => {
-  if (!canvasElement.value) return
-
-  // Créer la scène avec un fond beige clair
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(0xf4e8d8)
-
-  // Obtenir les dimensions du canvas
-  const width = canvasElement.value.clientWidth || 800
-  const height = canvasElement.value.clientHeight || 600
-
-  // Créer la caméra perspective
-  // FOV: 75°, ratio d'aspect, near: 0.1, far: 1000
-  camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
-  camera.position.set(0, 0, 3.5)  // Position initiale de la caméra (zoomé)
-
-  // Créer le renderer WebGL avec antialiasing
-  renderer = new THREE.WebGLRenderer({
-    canvas: canvasElement.value,
-    antialias: true  // Lissage des bords
+const onTresReady = (state) => {
+  console.log('onTresReady called with state:', state)
+  
+  // Attendre un tick pour s'assurer que tout est initialisé
+  nextTick(() => {
+    // Essayer d'accéder aux objets depuis la ref de TresCanvas
+    if (!tresCanvasRef.value) {
+      console.error('tresCanvasRef.value is null')
+      return
+    }
+    
+    // Accéder à l'état depuis la ref ou depuis le paramètre
+    const tresState = tresCanvasRef.value.state || state || tresCanvasRef.value
+    
+    if (!tresState) {
+      console.error('TresCanvas state not available')
+      return
+    }
+    
+    console.log('TresCanvas state:', tresState)
+    
+    // Stocker les références - vérifier différentes structures possibles
+    scene = tresState.scene?.value || tresState.scene
+    camera = tresState.camera?.value || tresState.camera
+    renderer = tresState.renderer?.value || tresState.renderer
+    
+    console.log('Extracted objects:', { scene, camera, renderer })
+    
+    if (!scene || !camera || !renderer) {
+      console.error('TresCanvas objects not available', { scene, camera, renderer })
+      return
+    }
+    
+    // Vérifier que camera.position existe avant d'appeler set
+    if (!camera.position) {
+      console.error('Camera position not available', camera)
+      return
+    }
+    
+    // Configurer la caméra
+    camera.position.set(0, 0, 3.5)
+    camera.fov = 75
+    camera.near = 0.1
+    camera.far = 1000
+    camera.updateProjectionMatrix()
+    
+    // Configurer la scène
+    if (scene) {
+      scene.background = new THREE.Color(0xf4e8d8)
+      
+      // Ajouter les lumières manuellement
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
+      scene.add(ambientLight)
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6)
+      directionalLight.position.set(5, 5, 5)
+      scene.add(directionalLight)
+      
+      const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4)
+      directionalLight2.position.set(-5, -5, -5)
+      scene.add(directionalLight2)
+    }
+    
+    // Créer les contrôles OrbitControls manuellement
+    if (renderer && renderer.domElement) {
+      controls = new ThreeOrbitControls(camera, renderer.domElement)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.05
+      controls.enableZoom = false
+      controls.enablePan = false
+      controls.enableRotate = true
+      const fixedPolarAngle = Math.PI / 2
+      controls.minPolarAngle = fixedPolarAngle
+      controls.maxPolarAngle = fixedPolarAngle
+    }
+    
+    // Initialiser le reste de la scène
+    initSceneAfterTresReady()
   })
-  renderer.setSize(width, height)
-  renderer.setPixelRatio(window.devicePixelRatio)  // Support des écrans haute résolution
+}
 
-  // ===== ÉCLAIRAGE =====
-  // Lumière ambiante (éclaire uniformément)
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
-  scene.add(ambientLight)
+/**
+ * Initialise la scène Three.js après que TresCanvas soit prêt
+ * 
+ * Configure la boucle d'animation et les handlers d'événements.
+ */
+const initSceneAfterTresReady = () => {
+  if (!scene || !camera || !renderer) return
 
-  // Lumière directionnelle principale (simule le soleil)
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6)
-  directionalLight.position.set(5, 5, 5)
-  scene.add(directionalLight)
-
-  // Lumière directionnelle secondaire (pour réduire les ombres dures)
-  const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4)
-  directionalLight2.position.set(-5, -5, -5)
-  scene.add(directionalLight2)
-
-  // ===== CONTRÔLES =====
-  // OrbitControls permet de faire tourner, zoomer et déplacer la caméra
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true        // Amortissement pour un mouvement fluide
-  controls.dampingFactor = 0.05        // Facteur d'amortissement
-  controls.enableZoom = false          // DÉSACTIVÉ : Pas de zoom pour avoir des coordonnées fixes
-  controls.enablePan = false           // DÉSACTIVÉ : Pas de déplacement pour avoir des coordonnées fixes
-  controls.enableRotate = true         // ACTIVÉ : Permet de tourner le modèle pour voir sous différents angles
-  // Désactiver la rotation verticale (autour de l'axe X)
-  // minPolarAngle et maxPolarAngle fixés à la même valeur = pas de rotation verticale
-  const fixedPolarAngle = Math.PI / 2  // Angle horizontal (90 degrés)
-  controls.minPolarAngle = fixedPolarAngle
-  controls.maxPolarAngle = fixedPolarAngle
+  // Obtenir les dimensions du canvas TresCanvas
+  const canvas = renderer.domElement
+  if (canvasElement.value) {
+    // Synchroniser le canvas caché pour compatibilité
+    canvasElement.value.width = canvas.width
+    canvasElement.value.height = canvas.height
+  }
 
   // ===== BOUCLE D'ANIMATION =====
   // Store pour la synchronisation des mises à jour de texture
@@ -725,9 +783,10 @@ const initScene = () => {
 
   // Handle resize
   handleResize = () => {
-    if (!canvasElement.value || !renderer || !camera) return
-    const newWidth = canvasElement.value.clientWidth
-    const newHeight = canvasElement.value.clientHeight
+    if (!renderer || !camera) return
+    const canvas = renderer.domElement
+    const newWidth = canvas.clientWidth
+    const newHeight = canvas.clientHeight
     camera.aspect = newWidth / newHeight
     camera.updateProjectionMatrix()
     renderer.setSize(newWidth, newHeight)
@@ -738,11 +797,30 @@ const initScene = () => {
   // Initial helper geometry to show when no model is loaded
   addHelperGeometry()
   
-  // Setup click handler when ready
-  nextTick(() => {
-    if (props.enableDirectEdit && renderer && currentMesh) {
-      setupClickHandler()
+  // Charger la texture d'environnement
+  loadEnvironmentMap().then(() => {
+    // Si un canvas 2D est fourni, configurer la texture partagée
+    if (props.canvas2D) {
+      setupSharedCanvasTexture(props.canvas2D)
     }
+    
+    if (props.modelUrl) {
+      loadModel(props.modelUrl)
+    }
+    
+    // Setup click handler when ready
+    nextTick(() => {
+      if (props.enableDirectEdit && renderer && renderer.domElement) {
+        console.log('Setting up click handler, renderer:', renderer, 'domElement:', renderer.domElement)
+        setupClickHandler()
+      } else {
+        console.warn('Cannot setup click handler:', { 
+          enableDirectEdit: props.enableDirectEdit, 
+          renderer: !!renderer, 
+          domElement: !!(renderer && renderer.domElement) 
+        })
+      }
+    })
   })
 }
 
@@ -905,16 +983,23 @@ const resetRotationState = () => {
  * - Les handlers de molette (onMouseWheel)
  */
 const setupClickHandler = () => {
-  if (!renderer || !canvasElement.value || raycaster3D) return
+  if (!renderer || !renderer.domElement) {
+    console.error('setupClickHandler: renderer or domElement not available')
+    return
+  }
   
-  // Créer le raycaster pour détecter les intersections
-  raycaster3D = new THREE.Raycaster()
-  mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
+  // Créer le raycaster pour détecter les intersections (si pas déjà créé)
+  if (!raycaster3D) {
+    raycaster3D = new THREE.Raycaster()
+    mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
+  }
   
   const getCanvasCoords = (event) => {
     if (!currentMesh || !props.canvas2D || !raycaster3D) return null
     
-    const rect = canvasElement.value.getBoundingClientRect()
+    // Utiliser le canvas de TresCanvas
+    const canvas = renderer.domElement
+    const rect = canvas.getBoundingClientRect()
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
     
@@ -951,6 +1036,14 @@ const setupClickHandler = () => {
   }
   
   const onMouseDown = (event) => {
+    console.log('onMouseDown called', { 
+      isDragging3D, 
+      isResizing3D, 
+      isRotating3D, 
+      dragMode: props.dragMode,
+      placementMode: props.placementMode 
+    })
+    
     // BLOQUER OrbitControls pendant la rotation
     // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
     if (isRotating3D) {
@@ -1257,6 +1350,10 @@ const setupClickHandler = () => {
   }
   
   const onMouseMove = (event) => {
+    // Log pour déboguer
+    if (isDragging3D || isResizing3D || isRotating3D) {
+      console.log('onMouseMove - action active', { isDragging3D, isResizing3D, isRotating3D })
+    }
     // BLOQUER OrbitControls pendant la rotation
     // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
     if (isRotating3D) {
@@ -1268,8 +1365,9 @@ const setupClickHandler = () => {
     const canvasCoords = getCanvasCoords(event)
     
     // Calculer aussi les coordonnées 3D pour l'affichage
-    if (canvasCoords !== null && currentMesh && props.canvas2D && raycaster3D) {
-      const rect = canvasElement.value.getBoundingClientRect()
+    if (canvasCoords !== null && currentMesh && props.canvas2D && raycaster3D && renderer) {
+      const canvas = renderer.domElement
+      const rect = canvas.getBoundingClientRect()
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
       
@@ -1579,9 +1677,10 @@ const setupClickHandler = () => {
     // (pour éviter de sélectionner pendant un drag)
     if (isDragging3D || isResizing3D || isRotating3D) return
     
-    if (!currentMesh || !props.canvas2D || !raycaster3D) return
+    if (!currentMesh || !props.canvas2D || !raycaster3D || !renderer) return
     
-    const rect = canvasElement.value.getBoundingClientRect()
+    const canvas = renderer.domElement
+    const rect = canvas.getBoundingClientRect()
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
     
@@ -1763,12 +1862,32 @@ const setupClickHandler = () => {
     emit('3d-scale', { scaleFactor })
   }
   
+  // Vérifier que renderer.domElement existe avant d'ajouter les listeners
+  if (!renderer || !renderer.domElement) {
+    console.error('setupClickHandler: renderer.domElement not available')
+    return
+  }
+  
+  const canvas = renderer.domElement
+  console.log('Attaching event listeners to canvas:', canvas)
+  
+  // Retirer les anciens listeners s'ils existent (pour éviter les doublons)
+  if (window._threeSceneDragHandlers) {
+    canvas.removeEventListener('mousedown', window._threeSceneDragHandlers.onMouseDown)
+    canvas.removeEventListener('mousemove', window._threeSceneDragHandlers.onMouseMove)
+    canvas.removeEventListener('mouseup', window._threeSceneDragHandlers.onMouseUp)
+    canvas.removeEventListener('click', window._threeSceneDragHandlers.onCanvasClick)
+    canvas.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
+  }
+  
   // Ajouter les event listeners pour le drag
-  renderer.domElement.addEventListener('mousedown', onMouseDown)
-  renderer.domElement.addEventListener('mousemove', onMouseMove)
-  renderer.domElement.addEventListener('mouseup', onMouseUp)
-  renderer.domElement.addEventListener('click', onCanvasClick)
-  renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false })
+  canvas.addEventListener('mousedown', onMouseDown)
+  canvas.addEventListener('mousemove', onMouseMove)
+  canvas.addEventListener('mouseup', onMouseUp)
+  canvas.addEventListener('click', onCanvasClick)
+  canvas.addEventListener('wheel', onMouseWheel, { passive: false })
+  
+  console.log('Event listeners attached successfully')
   
   // Nettoyer les event listeners au démontage
   window._threeSceneDragHandlers = {
@@ -3495,6 +3614,10 @@ defineExpose({
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.three-canvas-hidden {
+  display: none;
 }
 
 /* Bouton flottant pour ajouter un rectangle */

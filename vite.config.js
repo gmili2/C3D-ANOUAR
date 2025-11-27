@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { templateCompilerOptions } from '@tresjs/core'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue({
+      template: {
+        compilerOptions: {
+          ...templateCompilerOptions,
+          isCustomElement: (tag) => tag.startsWith('tres-'),
+        }
+      }
+    })
+  ],
   
   // Base path pour permettre l'ouverture directe du fichier (chemins relatifs)
   // Utilisez './' pour ouvrir directement index.html, ou '/' pour un serveur

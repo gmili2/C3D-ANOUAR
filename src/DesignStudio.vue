@@ -24,6 +24,10 @@
     <div class="studio-header">
       <h1>Studio de Design 3D</h1>
       <div class="header-actions">
+        <!-- Lien vers l'exemple TresJS -->
+        <router-link to="/tres-example" class="upload-btn">
+          🎨 Exemple TresJS
+        </router-link>
         <!-- Bouton pour uploader un fichier 3D (OBJ, GLB, GLTF) -->
         <label for="obj-upload" class="upload-btn">
           <input

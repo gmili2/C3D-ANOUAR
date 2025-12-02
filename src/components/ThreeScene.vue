@@ -11,32 +11,21 @@
 -->
 <template>
   <div class="three-scene-container">
-    <!-- TresCanvas pour le rendu 3D -->
+    <!-- ========================================================================
+         SECTION 1 : TRESCANVAS - Rendu 3D principal
+         ======================================================================== -->
     <TresCanvas
       ref="tresCanvasRef"
       clear-color="#f4e8d8"
       class="three-canvas"
       @ready="onTresReady"
     >
-      <!-- Les lumières et la caméra seront créées manuellement dans onTresReady -->
-      <!-- pour éviter les problèmes d'auto-importation -->
+      <!-- Les lumières et la caméra sont créées manuellement dans onTresReady -->
     </TresCanvas>
     
-    <!-- Canvas caché pour compatibilité avec le code existant -->
-    <canvas ref="canvasElement" class="three-canvas-hidden" style="display: none;"></canvas>
-    
-    <!-- Bouton flottant pour ajouter un rectangle -->
-    <button 
-      v-if="currentMesh"
-      @click="handleAddRectangleClick"
-      class="add-rectangle-btn"
-      :class="{ 'active': props.placementMode && props.placementType === 'rectangle' }"
-      title="Ajouter un rectangle sur le modèle 3D"
-    >
-      <span class="btn-icon">📐</span>
-      <span class="btn-text">{{ props.placementMode && props.placementType === 'rectangle' ? 'Cliquez sur le modèle' : '+ Rectangle' }}</span>
-    </button>
-    
+    <!-- ========================================================================
+         SECTION 2 : COMPOSANTS UTILITAIRES
+         ======================================================================== -->
     <!-- TextureUpdater invisible pour surveiller les mises à jour de texture -->
     <TextureUpdater
       v-if="canvasTexture && renderer && scene && camera"
@@ -46,8 +35,17 @@
       :scene="scene"
       :camera="camera"
     />
+    
+    <!-- ========================================================================
+         SECTION 3 : INTERFACES UTILISATEUR (COMMENTÉES - DÉBOGAGE)
+         ======================================================================== -->
+    <!-- 
+      Les sections suivantes sont commentées pour désactiver l'affichage de débogage.
+      Décommentez-les si nécessaire pour le développement.
+    -->
+    
     <!-- Affichage des coordonnées en temps réel -->
-    <div v-if="coordinatesDisplay.show" 
+    <!-- <div v-if="coordinatesDisplay.show" 
          :class="['coordinates-display', { 'on-seam': isOnSeam, 'on-rotation': coordinatesDisplay.isOnRotationHandle }]">
       <div class="coord-title">📍 Coordonnées Curseur</div>
       <div class="coord-section">
@@ -72,10 +70,10 @@
           Z: {{ coordinatesDisplay.worldPos.z.toFixed(2) }}
         </div>
       </div>
-    </div>
+    </div> -->
     
     <!-- Affichage des coordonnées de l'élément sélectionné -->
-    <div v-if="selectedObjectCoords.show" class="coordinates-display selected-object-coords">
+    <!-- <div v-if="selectedObjectCoords.show" class="coordinates-display selected-object-coords">
       <div class="coord-title">🎯 Élément Sélectionné</div>
       <div class="coord-content">
         <div class="coord-section">
@@ -116,9 +114,9 @@
         </div>
       </div>
     </div>
-    
+     -->
     <!-- Liste de tous les éléments -->
-    <div v-if="allObjectsList.length > 0" class="coordinates-display all-objects-list">
+    <!-- <div v-if="allObjectsList.length > 0" class="coordinates-display all-objects-list">
       <div class="coord-title">📋 Tous les Éléments ({{ allObjectsList.length }})</div>
       <div class="objects-scroll-container">
         <div 
@@ -176,7 +174,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </div> -->
     
     <!-- Liste des meshes de l'objet -->
     <!-- <div v-if="meshesList.length > 0" class="coordinates-display meshes-list">
@@ -205,8 +203,8 @@
       </div>
     </div> -->
     
-    <!-- Div de débogage pour les contrôles détectés -->
-    <div v-if="detectedControl.show" class="coordinates-display debug-control">
+    <!-- Div de débogage pour les contrôles détectés (DÉBOGAGE) -->
+    <!-- <div v-if="detectedControl.show" class="coordinates-display debug-control">
       <div class="coord-title">🔧 Contrôle Détecté</div>
       <div class="coord-content">
         <div class="coord-section">
@@ -237,10 +235,10 @@
           </div>
         </div>
       </div>
-    </div>
+    </div> -->
     
-    <!-- Liste des éléments du canvas -->
-    <div v-if="allObjectsList.length > 0" class="coordinates-display meshes-list">
+    <!-- Liste des éléments du canvas (DÉBOGAGE) -->
+    <!-- <div v-if="allObjectsList.length > 0" class="coordinates-display meshes-list">
       <div class="coord-title">📦 Éléments du Canvas ({{ allObjectsList.length }})</div>
       <div class="meshes-scroll-container">
         <div 
@@ -305,7 +303,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </div> -->
   </div>
 </template>
 
@@ -326,11 +324,15 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { setupCanvasTexture, applyTextureToMesh, useCanvasTextureStore } from '../composables/useCanvasTexture'
 import { project3DClickToCanvas } from '../composables/use3DTo2DProjection'
 import TextureUpdater from './TextureUpdater.vue'
+import { useCanvasStore } from '../stores/canvasStore'
 import { log } from 'three'
 // DecalGeometry supprimé pour utiliser les Shaders
 import { get3DPositionFromUV } from '../composables/use2DTo3DProjection'
 // TresJS imports - Seul TresCanvas est utilisé, le reste est créé manuellement
 import { TresCanvas } from '@tresjs/core'
+
+// ===== STORE PINIA =====
+const canvasStore = useCanvasStore()
 
 // ===== PROPS (Propriétés reçues du composant parent) =====
 const props = defineProps({
@@ -375,30 +377,6 @@ const props = defineProps({
     default: null  // Objet sélectionné sur le canvas 2D
   }
 })
-
-// ===== ÉVÉNEMENTS ÉMIS =====
-const emit = defineEmits([
-  'model-loaded',      // Modèle 3D chargé avec succès
-  'model-error',       // Erreur lors du chargement
-  'texture-ready',     // Texture partagée prête
-  '3d-click',          // Clic sur le modèle 3D
-  '3d-click-outside',  // Clic en dehors du modèle 3D (pour désélectionner)
-  'meshes-extracted',  // Liste des meshes extraits
-  '3d-drag',           // Glissement sur le modèle 3D
-  '3d-drag-start',     // Début du glissement
-  '3d-drag-end',       // Fin du glissement
-  '3d-scale',          // Redimensionnement avec molette
-  '3d-resize-start',   // Début du redimensionnement par bord
-  '3d-resize',         // Redimensionnement en cours par bord
-  '3d-resize-end',     // Fin du redimensionnement par bord
-  '3d-hover',          // Survol du modèle 3D (pour détecter les bords)
-  '3d-rotation-click',  // Clic sur le contrôle de rotation (mtr) dans la vue 3D
-  '3d-rotation-start',  // Début de la rotation depuis le mtr
-  '3d-rotation',        // Rotation en cours depuis le mtr
-  '3d-rotation-end',    // Fin de la rotation depuis le mtr
-  'add-rectangle-click', // Clic sur le bouton "+ Rectangle" dans la vue 3D
-  'detect-resize-handle' // Demande de détection d'un handle de resize
-])
 
 // ============================================================================
 // SECTION 1 : ÉTAT INTERNE & VARIABLES
@@ -520,19 +498,27 @@ const loadEnvironmentMap = async (url = null) => {
   try {
     if (url) {
       // Charger depuis une URL
-      environmentMap = await new Promise((resolve, reject) => {
-        loader.load(
-          url,
-          (texture) => {
-            texture.mapping = THREE.EquirectangularReflectionMapping
-            texture.needsUpdate = true
-            resolve(texture)
-          },
-          undefined,
-          (error) => reject(error)
-        )
-      })
-    } else {
+      try {
+        environmentMap = await new Promise((resolve, reject) => {
+          loader.load(
+            url,
+            (texture) => {
+              texture.mapping = THREE.EquirectangularReflectionMapping
+              texture.needsUpdate = true
+              resolve(texture)
+            },
+            undefined,
+            (error) => reject(error)
+          )
+        })
+      } catch (loadError) {
+        console.warn('Erreur lors du chargement de la texture d\'environnement depuis l\'URL, utilisation de la texture par défaut:', loadError)
+        // En cas d'erreur, continuer avec la texture générée ci-dessous
+        url = null
+      }
+    }
+    
+    if (!environmentMap) {
       // Créer une texture d'environnement simple (dégradé bleu-blanc)
       const envCanvas = document.createElement('canvas')
       envCanvas.width = 2048 // Format 2:1 pour équirectangulaire
@@ -569,14 +555,20 @@ const loadEnvironmentMap = async (url = null) => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
-              if (mat instanceof THREE.MeshStandardMaterial) {
+              if (mat instanceof THREE.MeshPhysicalMaterial || mat instanceof THREE.MeshStandardMaterial) {
                 mat.envMap = environmentMap
+                if (mat instanceof THREE.MeshPhysicalMaterial) {
+                  mat.envMapIntensity = 0.5
+                }
                 mat.needsUpdate = true
               }
             })
           } else {
-            if (child.material instanceof THREE.MeshStandardMaterial) {
+            if (child.material instanceof THREE.MeshPhysicalMaterial || child.material instanceof THREE.MeshStandardMaterial) {
               child.material.envMap = environmentMap
+              if (child.material instanceof THREE.MeshPhysicalMaterial) {
+                child.material.envMapIntensity = 0.5
+              }
               child.material.needsUpdate = true
             }
           }
@@ -586,6 +578,69 @@ const loadEnvironmentMap = async (url = null) => {
     
   } catch (error) {
   }
+}
+
+/**
+ * Crée un MeshPhysicalMaterial basé sur la configuration JSON fournie
+ * 
+ * @param {Object} options - Options supplémentaires pour le matériau
+ * @param {THREE.Texture} options.map - Texture à appliquer (optionnel)
+ * @param {THREE.Texture} options.envMap - Texture d'environnement (optionnel)
+ * @returns {THREE.MeshPhysicalMaterial} - Matériau physique configuré
+ */
+const createPhysicalMaterial = (options = {}) => {
+  const materialJson = {
+    metadata: {
+      version: 4.5,
+      type: "Material",
+      generator: "Material.toJSON"
+    },
+    uuid: "570D2D53-68D3-4861-9140-721A7573DEC0",
+    type: "MeshPhysicalMaterial",
+    color: 16777215,
+    roughness: 0.07,
+    envMapIntensity: 0.5,
+    metalness: 0,
+    emissive: 0,
+    clearcoat: 0.27,
+    clearcoatRoughness: 0.06,
+    opacity: 0.99,
+    transparent: true,
+    depthFunc: 3,
+    depthTest: false,
+    depthWrite: true,
+    stencilWrite: false,
+    stencilWriteMask: 255,
+    stencilFunc: 519,
+    stencilRef: 0,
+    stencilFuncMask: 255,
+    stencilFail: 7680,
+    stencilZFail: 7680,
+    stencilZPass: 7680,
+    skinning: true,
+    transmission: 0
+  }
+
+  const material = new THREE.MeshPhysicalMaterial({
+    color: materialJson.color,
+    roughness: materialJson.roughness,
+    envMapIntensity: materialJson.envMapIntensity,
+    metalness: materialJson.metalness,
+    emissive: materialJson.emissive,
+    clearcoat: materialJson.clearcoat,
+    clearcoatRoughness: materialJson.clearcoatRoughness,
+    opacity: materialJson.opacity,
+    transparent: materialJson.transparent,
+    depthTest: materialJson.depthTest,
+    depthWrite: materialJson.depthWrite,
+    side: THREE.DoubleSide, // Ajouté pour compatibilité avec le code existant
+    map: options.map || null,
+    envMap: options.envMap || environmentMap || null,
+    skinning: materialJson.skinning,
+    transmission: materialJson.transmission
+  })
+
+  return material
 }
 
 onMounted(async () => {
@@ -623,7 +678,7 @@ watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
     if (oldWidth !== newWidth || oldHeight !== newHeight) {
     }
     
-    setupSharedCanvasTexture(newCanvas)
+    // setupSharedCanvasTexture(newCanvas)
   }
 }, { deep: true })
 
@@ -632,6 +687,7 @@ onUnmounted(() => {
 })
 
 watch(() => props.modelUrl, (newUrl) => {
+  alert('watch modelUrl called with newUrl: ' + newUrl)
   if (newUrl && scene) {
     loadModel(newUrl)
   }
@@ -648,13 +704,13 @@ watch(() => props.texture, (newTexture) => {
  * Récupère les références à scene, camera, renderer depuis TresCanvas
  */
 const onTresReady = (state) => {
-  console.log('onTresReady called with state:', state)
+  // console.log('onTresReady called with state:', state)
   
   // Attendre un tick pour s'assurer que tout est initialisé
   nextTick(() => {
     // Essayer d'accéder aux objets depuis la ref de TresCanvas
     if (!tresCanvasRef.value) {
-      console.error('tresCanvasRef.value is null')
+      // console.error('tresCanvasRef.value is null')
       return
     }
     
@@ -662,27 +718,27 @@ const onTresReady = (state) => {
     const tresState = tresCanvasRef.value.state || state || tresCanvasRef.value
     
     if (!tresState) {
-      console.error('TresCanvas state not available')
+      // console.error('TresCanvas state not available')
       return
     }
     
-    console.log('TresCanvas state:', tresState)
+    // console.log('TresCanvas state:', tresState)
     
     // Stocker les références - vérifier différentes structures possibles
     scene = tresState.scene?.value || tresState.scene
     camera = tresState.camera?.value || tresState.camera
     renderer = tresState.renderer?.value || tresState.renderer
     
-    console.log('Extracted objects:', { scene, camera, renderer })
+    // console.log('Extracted objects:', { scene, camera, renderer })
     
     if (!scene || !camera || !renderer) {
-      console.error('TresCanvas objects not available', { scene, camera, renderer })
+      // console.error('TresCanvas objects not available', { scene, camera, renderer })
       return
     }
     
     // Vérifier que camera.position existe avant d'appeler set
     if (!camera.position) {
-      console.error('Camera position not available', camera)
+      // console.error('Camera position not available', camera)
       return
     }
     
@@ -811,14 +867,14 @@ const initSceneAfterTresReady = () => {
     // Setup click handler when ready
     nextTick(() => {
       if (props.enableDirectEdit && renderer && renderer.domElement) {
-        console.log('Setting up click handler, renderer:', renderer, 'domElement:', renderer.domElement)
+        // console.log('Setting up click handler, renderer:', renderer, 'domElement:', renderer.domElement)
         setupClickHandler()
       } else {
-        console.warn('Cannot setup click handler:', { 
-          enableDirectEdit: props.enableDirectEdit, 
-          renderer: !!renderer, 
-          domElement: !!(renderer && renderer.domElement) 
-        })
+        // console.warn('Cannot setup click handler:', { 
+        //   enableDirectEdit: props.enableDirectEdit, 
+        //   renderer: !!renderer, 
+        //   domElement: !!(renderer && renderer.domElement) 
+        // })
       }
     })
   })
@@ -984,7 +1040,7 @@ const resetRotationState = () => {
  */
 const setupClickHandler = () => {
   if (!renderer || !renderer.domElement) {
-    console.error('setupClickHandler: renderer or domElement not available')
+    // console.error('setupClickHandler: renderer or domElement not available')
     return
   }
   
@@ -1036,20 +1092,20 @@ const setupClickHandler = () => {
   }
   
   const onMouseDown = (event) => {
-    console.log('onMouseDown called', { 
-      isDragging3D, 
-      isResizing3D, 
-      isRotating3D, 
-      dragMode: props.dragMode,
-      placementMode: props.placementMode 
-    })
+    // console.log('onMouseDown called', { 
+    //   isDragging3D, 
+    //   isResizing3D, 
+    //   isRotating3D, 
+    //   dragMode: props.dragMode,
+    //   placementMode: props.placementMode 
+    // })
     
     // BLOQUER OrbitControls pendant la rotation
     // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
     if (isRotating3D) {
       event.stopPropagation()
       event.preventDefault()
-      console.log('🚫 Événement mousedown bloqué - rotation en cours')
+      // console.log('🚫 Événement mousedown bloqué - rotation en cours')
     }
     
     if (!props.dragMode) return
@@ -1070,7 +1126,7 @@ const setupClickHandler = () => {
           
           // Si on clique ailleurs que sur le mtr, désactiver la rotation
           if (distance > clickThreshold) {
-            emit('3d-rotation-end')
+            canvasStore.trigger3DRotationEnd()
             isRotating3D = false
             rotationStartPosition = null
             rotationStartCursor = null
@@ -1082,7 +1138,7 @@ const setupClickHandler = () => {
           }
         } else {
           // Si l'objet n'est plus sélectionné, désactiver la rotation
-          emit('3d-rotation-end')
+          canvasStore.trigger3DRotationEnd()
           isRotating3D = false
           rotationStartPosition = null
           rotationStartCursor = null
@@ -1244,23 +1300,23 @@ const setupClickHandler = () => {
           // Stocker le centre calculé pour toute la durée de la rotation
           rotationCenter = { x: centerX, y: centerY }
           
-          console.log('🎯 Centre géométrique calculé au début de la rotation:', rotationCenter)
+          // console.log('🎯 Centre géométrique calculé au début de la rotation:', rotationCenter)
           
           // Désactiver COMPLÈTEMENT les contrôles OrbitControls pendant la rotation
           // Cela évite que la caméra/goblet ne tourne en même temps que l'objet
           if (controls) {
             controls.enabled = false        // Désactiver tous les contrôles
             controls.enableRotate = false   // Désactiver spécifiquement la rotation
-            console.log('🔒 OrbitControls désactivés pendant la rotation')
+            // console.log('🔒 OrbitControls désactivés pendant la rotation')
           }
           
           // Log de débogage pour vérifier les valeurs
-          console.log('3d-rotation-start',canvasCoords.x,canvasCoords.y,selectedObjectCoords.value.controls.mtr,rotationStartCursor);
+          // console.log('3d-rotation-start',canvasCoords.x,canvasCoords.y,selectedObjectCoords.value.controls.mtr,rotationStartCursor);
           
           // Émettre l'événement '3d-rotation-start' vers le composant parent
           // Cet événement informe le parent (DesignStudio) qu'une rotation commence
           // Le parent peut alors préparer l'objet Fabric.js pour la rotation
-          emit('3d-rotation-start', {
+          canvasStore.trigger3DRotationStart({
             canvasX: canvasCoords.x,      // Position X du curseur
             canvasY: canvasCoords.y,      // Position Y du curseur
             mtrCoords: selectedObjectCoords.value.controls.mtr  // Coordonnées du mtr
@@ -1275,8 +1331,8 @@ const setupClickHandler = () => {
       // Si on clique ailleurs que sur le mtr, désactiver la rotation si elle était active
       // (cela couvre le cas où on clique sur un autre point de la surface ou en dehors de l'objet)
       if (isRotating3D) {
-        console.log('3d-rotation-end');
-        emit('3d-rotation-end')
+        // console.log('3d-rotation-end');
+        canvasStore.trigger3DRotationEnd()
         isRotating3D = false
         rotationStartPosition = null
         rotationStartCursor = null
@@ -1301,7 +1357,7 @@ const setupClickHandler = () => {
       // Demander au parent (via emit) de détecter le handle
       // On émet un événement synchrone pour obtenir la réponse
       const detectResizeResult = { isResize: false, handleInfo: null }
-      emit('detect-resize-handle', {
+        canvasStore.triggerDetectResizeHandle({
         canvasX: canvasCoords.x,
         canvasY: canvasCoords.y,
         result: detectResizeResult
@@ -1318,25 +1374,25 @@ const setupClickHandler = () => {
         resizeHandleInfo = handleInfo
         
         // Émettre l'événement de début de resize
-        emit('3d-resize-start', {
+        canvasStore.trigger3DResizeStart({
           canvasX: canvasCoords.x,
           canvasY: canvasCoords.y,
           handleInfo: handleInfo
         })
         
-        console.log('🔧 Mode RESIZE activé', handleInfo)
+        // console.log('🔧 Mode RESIZE activé', handleInfo)
       } else {
         // C'EST UN DRAG (déplacement)
         isDragging3D = true
         isResizing3D = false
         
         // Émettre l'événement de début de drag
-        emit('3d-drag-start', {
+        canvasStore.trigger3DDragStart({
           canvasX: canvasCoords.x,
           canvasY: canvasCoords.y
         })
         
-        console.log('✋ Mode DRAG activé')
+        // console.log('✋ Mode DRAG activé')
       }
       
       // Initialiser la position de référence
@@ -1351,9 +1407,9 @@ const setupClickHandler = () => {
   
   const onMouseMove = (event) => {
     // Log pour déboguer
-    if (isDragging3D || isResizing3D || isRotating3D) {
-      console.log('onMouseMove - action active', { isDragging3D, isResizing3D, isRotating3D })
-    }
+    // if (isDragging3D || isResizing3D || isRotating3D) {
+    //   console.log('onMouseMove - action active', { isDragging3D, isResizing3D, isRotating3D })
+    // }
     // BLOQUER OrbitControls pendant la rotation
     // Si une rotation est en cours, empêcher OrbitControls de recevoir l'événement
     if (isRotating3D) {
@@ -1448,7 +1504,7 @@ const setupClickHandler = () => {
     
     // Toujours émettre l'événement hover pour détecter les bords et changer le curseur
     if (canvasCoords !== null) {
-      emit('3d-hover', {
+      canvasStore.trigger3DHover({
         canvasX: canvasCoords.x,
         canvasY: canvasCoords.y
       })
@@ -1505,7 +1561,7 @@ const setupClickHandler = () => {
       const centerX = rotationCenter.x
       const centerY = rotationCenter.y
       
-      console.log('🎯 Utilisation du centre pré-calculé:', centerX, centerY)
+      // console.log('🎯 Utilisation du centre pré-calculé:', centerX, centerY)
       
       /**
        * ======================================================================
@@ -1583,7 +1639,7 @@ const setupClickHandler = () => {
        * Le composant parent (DesignStudio) reçoit cet événement et applique
        * la rotation à l'objet Fabric.js correspondant.
        */
-      emit('3d-rotation', {
+      canvasStore.trigger3DRotation({
         canvasX: canvasCoords.x,           // Position X actuelle du curseur
         canvasY: canvasCoords.y,           // Position Y actuelle du curseur
         angle: angleDelta,                 // Angle de rotation à appliquer (en degrés)
@@ -1596,7 +1652,7 @@ const setupClickHandler = () => {
       if (canvasCoords !== null) {
         if (isResizing3D && resizeStartPosition && resizeHandleInfo) {
           // Mode redimensionnement
-          emit('3d-resize', {
+          canvasStore.trigger3DResize({
             canvasX: canvasCoords.x,
             canvasY: canvasCoords.y,
             startX: resizeStartPosition.x,
@@ -1605,7 +1661,7 @@ const setupClickHandler = () => {
           })
         } else if (isDragging3D) {
           // Mode déplacement
-          emit('3d-drag', {
+          canvasStore.trigger3DDrag({
             canvasX: canvasCoords.x,
             canvasY: canvasCoords.y
           })
@@ -1617,7 +1673,7 @@ const setupClickHandler = () => {
   
   const onMouseUp = (event) => {
     if (isRotating3D) {
-      emit('3d-rotation-end')
+      canvasStore.trigger3DRotationEnd()
       isRotating3D = false
       rotationStartPosition = null
       rotationStartCursor = null
@@ -1635,7 +1691,7 @@ const setupClickHandler = () => {
       if (controls) {
         controls.enabled = true         // Réactiver tous les contrôles
         controls.enableRotate = true    // Réactiver spécifiquement la rotation
-        console.log('🔓 OrbitControls réactivés après la rotation')
+        // console.log('🔓 OrbitControls réactivés après la rotation')
       }
       
       // Réinitialiser le flag après un délai
@@ -1646,14 +1702,14 @@ const setupClickHandler = () => {
     
     if (isDragging3D || isResizing3D) {
       if (isResizing3D) {
-        emit('3d-resize-end')
+        canvasStore.trigger3DResizeEnd()
         isResizing3D = false
         resizeStartPosition = null
         resizeHandleInfo = null
       }
       
       if (isDragging3D) {
-        emit('3d-drag-end')
+        canvasStore.trigger3DDragEnd()
         isDragging3D = false
       }
       
@@ -1744,8 +1800,8 @@ const setupClickHandler = () => {
             if (distance <= clickThreshold) {
               isRotationClick = true
               // Émettre un événement spécial pour activer la rotation
-              console.log('3d-rotation-click');
-              emit('3d-rotation-click', {
+              // console.log('3d-rotation-click');
+              canvasStore.trigger3DRotationClick({
                 intersection,
                 canvasX: canvasCoords.x,
                 canvasY: canvasCoords.y,
@@ -1758,7 +1814,7 @@ const setupClickHandler = () => {
           
           // Si on est en mode placement, émettre l'événement pour placer l'élément
           if (!isRotationClick && props.placementMode && props.placementType) {
-            emit('3d-click', {
+            canvasStore.trigger3DClick({
               intersection,
               canvasX: canvasCoords.x,
               canvasY: canvasCoords.y,
@@ -1768,7 +1824,7 @@ const setupClickHandler = () => {
             })
           } else if (!isRotationClick) {
             // Sinon, comportement normal (peut être utilisé pour d'autres fonctionnalités)
-            emit('3d-click', {
+            canvasStore.trigger3DClick({
               intersection,
               canvasX: canvasCoords.x,
               canvasY: canvasCoords.y,
@@ -1813,7 +1869,7 @@ const setupClickHandler = () => {
               )
               if (newCanvasCoords !== null) {
                 if (props.placementMode && props.placementType) {
-                  emit('3d-click', {
+                  canvasStore.trigger3DClick({
                     intersection: newIntersects[0],
                     canvasX: newCanvasCoords.x,
                     canvasY: newCanvasCoords.y,
@@ -1822,7 +1878,7 @@ const setupClickHandler = () => {
                     placementType: props.placementType
                   })
                 } else {
-                  emit('3d-click', {
+                  canvasStore.trigger3DClick({
                     intersection: newIntersects[0],
                     canvasX: newCanvasCoords.x,
                     canvasY: newCanvasCoords.y,
@@ -1838,7 +1894,7 @@ const setupClickHandler = () => {
       }
     } else {
       // Clic en dehors du modèle 3D - désélectionner l'objet
-      emit('3d-click-outside', {})
+      canvasStore.trigger3DClickOutside({})
     }
   }
   
@@ -1859,17 +1915,17 @@ const setupClickHandler = () => {
     const scaleFactor = 1 + (delta * 0.02) // 2% par incrément pour plus de précision
     
     // Émettre l'événement de redimensionnement
-    emit('3d-scale', { scaleFactor })
+    canvasStore.trigger3DScale({ scaleFactor })
   }
   
   // Vérifier que renderer.domElement existe avant d'ajouter les listeners
   if (!renderer || !renderer.domElement) {
-    console.error('setupClickHandler: renderer.domElement not available')
+    // console.error('setupClickHandler: renderer.domElement not available')
     return
   }
   
   const canvas = renderer.domElement
-  console.log('Attaching event listeners to canvas:', canvas)
+  // console.log('Attaching event listeners to canvas:', canvas)
   
   // Retirer les anciens listeners s'ils existent (pour éviter les doublons)
   if (window._threeSceneDragHandlers) {
@@ -1887,7 +1943,7 @@ const setupClickHandler = () => {
   canvas.addEventListener('click', onCanvasClick)
   canvas.addEventListener('wheel', onMouseWheel, { passive: false })
   
-  console.log('Event listeners attached successfully')
+  // console.log('Event listeners attached successfully')
   
   // Nettoyer les event listeners au démontage
   window._threeSceneDragHandlers = {
@@ -2085,38 +2141,31 @@ const loadModel = async (url) => {
         }
         
         if (!child.material) {
-          child.material = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            side: THREE.DoubleSide,
+          child.material = createPhysicalMaterial({
             map: null, // Will be set when texture is applied
-            envMap: environmentMap, // Texture d'environnement pour les réflexions
-            transparent: true, // Rendre le gobelet transparent
-            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles (les zones transparentes restent transparentes grâce à alphaTest)
-            alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus, zones vraiment transparentes (alpha < 0.01) sont complètement invisibles
-            metalness: 0.3, // Légèrement métallique pour voir les réflexions
-            roughness: 0.7 // Surface légèrement rugueuse
+            envMap: environmentMap // Texture d'environnement pour les réflexions
           })
         } else {
           // S'assurer que le matériau existant est aussi transparent
           if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
               mat.transparent = true
-              mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-              mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-              if (mat instanceof THREE.MeshStandardMaterial) {
+              mat.opacity = 0.99 // Utiliser l'opacité de la configuration
+              if (mat instanceof THREE.MeshPhysicalMaterial || mat instanceof THREE.MeshStandardMaterial) {
                 mat.envMap = environmentMap
-                mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
-                mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
+                if (mat instanceof THREE.MeshPhysicalMaterial) {
+                  mat.envMapIntensity = 0.5
+                }
               }
             })
           } else {
             child.material.transparent = true
-            child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-            child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-            if (child.material instanceof THREE.MeshStandardMaterial) {
+            child.material.opacity = 0.99 // Utiliser l'opacité de la configuration
+            if (child.material instanceof THREE.MeshPhysicalMaterial || child.material instanceof THREE.MeshStandardMaterial) {
               child.material.envMap = environmentMap
-              child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
-              child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
+              if (child.material instanceof THREE.MeshPhysicalMaterial) {
+                child.material.envMapIntensity = 0.5
+              }
             }
           }
           if (!child.material.map) {
@@ -2137,14 +2186,20 @@ const loadModel = async (url) => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
-              if (mat instanceof THREE.MeshStandardMaterial) {
+              if (mat instanceof THREE.MeshPhysicalMaterial || mat instanceof THREE.MeshStandardMaterial) {
                 mat.envMap = environmentMap
+                if (mat instanceof THREE.MeshPhysicalMaterial) {
+                  mat.envMapIntensity = 0.5
+                }
                 mat.needsUpdate = true
               }
             })
           } else {
-            if (child.material instanceof THREE.MeshStandardMaterial) {
+            if (child.material instanceof THREE.MeshPhysicalMaterial || child.material instanceof THREE.MeshStandardMaterial) {
               child.material.envMap = environmentMap
+              if (child.material instanceof THREE.MeshPhysicalMaterial) {
+                child.material.envMapIntensity = 0.5
+              }
               child.material.needsUpdate = true
             }
           }
@@ -2214,21 +2269,23 @@ const loadModel = async (url) => {
       }
     })
     
-    emit('model-loaded', obj)
-    emit('meshes-extracted', allMeshes) 
+    canvasStore.triggerModelLoaded(obj)
+    canvasStore.triggerMeshesExtracted(allMeshes) 
 
     // Si un canvas 2D est fourni, configurer la texture partagée
     // Attendre un peu pour s'assurer que tout est prêt
     await nextTick()
     
     if (props.canvas2D) {
-      setupSharedCanvasTexture(props.canvas2D)
+      console.log
+      ("setupSharedCanvasTexture called")
+      // setupSharedCanvasTexture(props.canvas2D)
     } else if (props.texture) {
       // Sinon, utiliser la texture fournie en prop
       applyTexture(props.texture)
     }
   } catch (error) {
-    emit('model-error', error)
+    canvasStore.triggerModelError(error)
   }
 }
 
@@ -2277,7 +2334,7 @@ const setupSharedCanvasTexture = (htmlCanvas) => {
     // Appliquer sur tous les meshes
     applyTextureToMesh(currentMesh, canvasTexture)
     
-    emit('texture-ready', canvasTexture)
+    canvasStore.triggerTextureReady(canvasTexture)
     
   } catch (error) {
   }
@@ -2591,52 +2648,36 @@ const applyTexture = (texture) => {
       // Apply texture to material
       if (Array.isArray(child.material)) {
         child.material.forEach((mat, idx) => {
-          if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
+          if (mat instanceof THREE.MeshPhysicalMaterial || mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
             mat.map = texture
             mat.envMap = environmentMap // Ajouter la texture d'environnement
             mat.transparent = true // Maintenir la transparence
-            mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-            mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-            if (mat instanceof THREE.MeshStandardMaterial) {
-              mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
-              mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
+            mat.opacity = 0.99 // Utiliser l'opacité de la configuration
+            if (mat instanceof THREE.MeshPhysicalMaterial) {
+              mat.envMapIntensity = 0.5
             }
             mat.needsUpdate = true
           } else {
-            child.material[idx] = new THREE.MeshStandardMaterial({
+            child.material[idx] = createPhysicalMaterial({
               map: texture,
-              envMap: environmentMap, // Ajouter la texture d'environnement
-              side: THREE.DoubleSide,
-              transparent: true, // Rendre transparent
-              opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
-              alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-              metalness: 0.3,
-              roughness: 0.7
+              envMap: environmentMap
             })
           }
         })
       } else {
-        if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
+        if (child.material instanceof THREE.MeshPhysicalMaterial || child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
           child.material.map = texture
           child.material.envMap = environmentMap // Ajouter la texture d'environnement
           child.material.transparent = true // Maintenir la transparence
-          child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-          child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-          if (child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
-            child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
+          child.material.opacity = 0.99 // Utiliser l'opacité de la configuration
+          if (child.material instanceof THREE.MeshPhysicalMaterial) {
+            child.material.envMapIntensity = 0.5
           }
           child.material.needsUpdate = true
         } else {
-          child.material = new THREE.MeshStandardMaterial({
+          child.material = createPhysicalMaterial({
             map: texture,
-            envMap: environmentMap, // Ajouter la texture d'environnement
-            side: THREE.DoubleSide,
-            transparent: true, // Rendre transparent
-            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
-            alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
-            metalness: 0.3,
-            roughness: 0.7
+            envMap: environmentMap
           })
         }
       }
@@ -2719,14 +2760,20 @@ const createSeamlessGoblet = () => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             child.material.forEach(mat => {
-              if (mat instanceof THREE.MeshStandardMaterial) {
+              if (mat instanceof THREE.MeshPhysicalMaterial || mat instanceof THREE.MeshStandardMaterial) {
                 mat.envMap = environmentMap
+                if (mat instanceof THREE.MeshPhysicalMaterial) {
+                  mat.envMapIntensity = 0.5
+                }
                 mat.needsUpdate = true
               }
             })
           } else {
-            if (child.material instanceof THREE.MeshStandardMaterial) {
+            if (child.material instanceof THREE.MeshPhysicalMaterial || child.material instanceof THREE.MeshStandardMaterial) {
               child.material.envMap = environmentMap
+              if (child.material instanceof THREE.MeshPhysicalMaterial) {
+                child.material.envMapIntensity = 0.5
+              }
               child.material.needsUpdate = true
             }
           }
@@ -2758,8 +2805,8 @@ const createSeamlessGoblet = () => {
     })
     
     
-    emit('model-loaded', clonedMesh)
-    emit('meshes-extracted', allMeshes)
+    canvasStore.triggerModelLoaded(clonedMesh)
+    canvasStore.triggerMeshesExtracted(allMeshes)
     
     return true
   } catch (error) {
@@ -3072,7 +3119,7 @@ const calculateControlCoordinates = (obj, skipSetCoords = false) => {
       }
     }
   } catch (e) {
-    console.warn('Erreur lors de calcCoords:', e)
+    // console.warn('Erreur lors de calcCoords:', e)
     // Si calcCoords échoue, essayer oCoords
     coords = obj.oCoords || null
   }
@@ -3273,7 +3320,7 @@ const rotateModel = (angleDegrees) => {
   // L'angle dans Fabric.js est dans le sens horaire, on le convertit pour Three.js
   const angleRadians = THREE.MathUtils.degToRad(angleDegrees)
   
-  console.log('🔄 Rotation 3D - Angle:', angleDegrees, '° (', angleRadians, 'rad)')
+  // console.log('🔄 Rotation 3D - Angle:', angleDegrees, '° (', angleRadians, 'rad)')
   
   // Méthode 1 : Utiliser setRotationFromEuler (plus propre et explicite)
   // Créer un Euler avec rotation uniquement autour de l'axe Y
@@ -3502,7 +3549,7 @@ const startDecalRotation = async (objectProps, dataUrl) => {
     shaderUniforms.uDecalVisible.value = 1
     
   } catch (e) {
-    console.error("Erreur setup shader:", e)
+    // console.error("Erreur setup shader:", e)
   }
 }
 
@@ -3537,10 +3584,10 @@ const endDecalRotation = () => {
 const handleAddRectangleClick = () => {
   // Si le mode placement de rectangle est déjà actif, le désactiver
   if (props.placementMode && props.placementType === 'rectangle') {
-    emit('add-rectangle-click', { active: false })
+    canvasStore.triggerAddRectangleClick({ active: false })
   } else {
     // Sinon, activer le mode placement de rectangle
-    emit('add-rectangle-click', { active: true })
+    canvasStore.triggerAddRectangleClick({ active: true })
   }
 }
 
@@ -3551,7 +3598,7 @@ const disableOrbitControls = () => {
   if (controls) {
     controls.enabled = false
     controls.enableRotate = false
-    console.log('🔒 OrbitControls désactivés')
+    // console.log('🔒 OrbitControls désactivés')
   }
 }
 
@@ -3562,7 +3609,7 @@ const enableOrbitControls = () => {
   if (controls) {
     controls.enabled = true
     controls.enableRotate = true
-    console.log('🔓 OrbitControls réactivés')
+    // console.log('🔓 OrbitControls réactivés')
   }
 }
 
@@ -3598,8 +3645,7 @@ defineExpose({
   setDetectedControl,
   resetRotationState,
   updateTextureDirect, // Méthode pour mise à jour directe (plus rapide)
-  renderer: () => renderer,
-  emit
+  renderer: () => renderer
 })
 </script>
 

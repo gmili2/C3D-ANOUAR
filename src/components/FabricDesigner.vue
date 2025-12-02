@@ -212,19 +212,11 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern, ActiveSelection } from 'fabric'
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
+import { useCanvasStore } from '../stores/canvasStore'
 import { log } from 'three'
 
-// ===== ÉVÉNEMENTS ÉMIS =====
-const emit = defineEmits([
-  'design-updated',          // Le design a été modifié
-  'canvas-ready',            // Le canvas est prêt
-  'placement-mode-changed',  // Le mode placement a changé
-  'object-selected',         // Un objet a été sélectionné
-  'object-deselected',       // Aucun objet n'est sélectionné
-  'move-object',             // Un objet a été déplacé
-  'objects-changed',         // La liste des objets a changé (ajout/suppression)
-  'object-rotated'           // Un objet a été roté (pour appliquer la rotation au modèle 3D)
-])
+// ===== STORE PINIA =====
+const canvasStore = useCanvasStore()
 
 // ===== PROPS =====
 const props = defineProps({
@@ -539,7 +531,7 @@ const replaceOriginalWithCopy = (original, copy) => {
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 /**
@@ -1326,14 +1318,14 @@ const initCanvas = () => {
     const signalChange = () => {
       canvas.renderAll() // Forcer le rendu du canvas
       requestTextureUpdateImmediate() // Mise à jour immédiate pour événements critiques
-      emit('design-updated', canvas) // Émettre l'événement
+      canvasStore.markDesignUpdated() // Émettre l'événement
     }
     
     // Fonction helper pour signaler les changements fréquents (throttled)
     const signalChangeThrottled = () => {
       canvas.renderAll() // Forcer le rendu du canvas
       requestTextureUpdate() // Mise à jour throttled avec RAF
-      emit('design-updated', canvas) // Émettre l'événement
+      canvasStore.markDesignUpdated() // Émettre l'événement
     }
 
     // Sauvegarder l'état initial
@@ -1401,10 +1393,7 @@ const initCanvas = () => {
           }
         }
         
-        emit('object-selected', { 
-          object: activeObject,
-          type: activeObject.type 
-        })
+        canvasStore.setSelectedObject(activeObject)
       }
     })
     
@@ -1466,10 +1455,7 @@ const initCanvas = () => {
           }
         }
         
-        emit('object-selected', { 
-          object: activeObject,
-          type: activeObject.type 
-        })
+        canvasStore.setSelectedObject(activeObject)
       }
     })
     
@@ -1479,7 +1465,7 @@ const initCanvas = () => {
       if (canvas.userData?.multiSelectedObjects) {
         canvas.userData.multiSelectedObjects = []
       }
-      emit('object-deselected')
+      canvasStore.setSelectedObject(null)
       // Mettre à jour la liste des objets 2D
       updateObjectsList2D()
     })
@@ -1492,8 +1478,9 @@ const initCanvas = () => {
     canvas.on('object:added', () => {
       saveHistory()
       signalChange()
-      // Notifier le parent pour mettre à jour la liste des objets
-      emit('objects-changed')
+      // Mettre à jour la liste des objets dans le store
+      const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+      canvasStore.updateAllObjects(objects)
       // Mettre à jour la liste des objets 2D
       updateObjectsList2D()
     })
@@ -1515,10 +1502,7 @@ const initCanvas = () => {
       // Mettre à jour les coordonnées de l'objet sélectionné si nécessaire
       const activeObject = canvas.getActiveObject()
       if (activeObject) {
-        emit('object-selected', {
-          object: activeObject,
-          type: activeObject.type
-        })
+        canvasStore.setSelectedObject(activeObject, true) // skipCallback = true pour éviter la boucle
       }
     })
     canvas.on('object:removed', (e) => {
@@ -1531,8 +1515,9 @@ const initCanvas = () => {
       }
       saveHistory()
       signalChange()
-      // Notifier le parent pour mettre à jour la liste des objets
-      emit('objects-changed')
+      // Mettre à jour la liste des objets dans le store
+      const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
+      canvasStore.updateAllObjects(objects)
     })
     canvas.on('object:moving', async (e) => {
       // Appliquer l'effet wrap around pendant le déplacement avec la souris
@@ -1551,10 +1536,7 @@ const initCanvas = () => {
       // Mettre à jour les coordonnées de l'objet sélectionné en temps réel
       const activeObject = canvas.getActiveObject()
       if (activeObject === obj) {
-        emit('object-selected', {
-          object: activeObject,
-          type: activeObject.type
-        })
+        canvasStore.setSelectedObject(activeObject, true) // skipCallback = true pour éviter la boucle
       }
       
       // Pendant le déplacement, mettre à jour fréquemment (MISE À JOUR DIRECTE - plus rapide)
@@ -1630,10 +1612,7 @@ const initCanvas = () => {
       // Mettre à jour les coordonnées de l'objet sélectionné en temps réel
       const activeObject = canvas.getActiveObject()
       if (activeObject === obj) {
-        emit('object-selected', {
-          object: activeObject,
-          type: activeObject.type
-        })
+        canvasStore.setSelectedObject(activeObject, true) // skipCallback = true pour éviter la boucle
       }
       
       // Pendant le redimensionnement, mettre à jour en temps réel (MISE À JOUR DIRECTE - plus rapide)
@@ -1644,7 +1623,7 @@ const initCanvas = () => {
       } else {
         requestTextureUpdate() // Fallback vers le store si méthode directe non disponible
       }
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
     })
     // Événement après le redimensionnement (scaling terminé)
     canvas.on('object:scaled', (e) => {
@@ -1705,7 +1684,7 @@ const initCanvas = () => {
       
       // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
       if (obj && !obj.userData?.isWorkZoneIndicator) {
-        emit('object-rotated', {
+        canvasStore.notifyObjectRotated({
           object: obj,
           angle: obj.angle || 0 // Angle en degrés
         })
@@ -1943,7 +1922,7 @@ const initCanvas = () => {
       }
       renderTimeout = setTimeout(() => {
         requestTextureUpdate() // Throttled avec RAF pour performance optimale
-        emit('design-updated', canvas)
+        canvasStore.markDesignUpdated()
       }, 100)
     })
     
@@ -1957,7 +1936,8 @@ const initCanvas = () => {
           canvasEl.style.visibility = 'visible'
           canvasEl.style.opacity = '1'
         }
-        emit('canvas-ready', canvas.getElement())
+        canvasStore.setCanvas(canvas)
+        canvasStore.setCanvasElement(canvas.getElement())
       })
     }
     
@@ -1978,7 +1958,7 @@ const undo = () => {
     canvas.loadFromJSON(history[historyIndex], () => {
       canvas.renderAll()
       requestTextureUpdate()
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
       isUndoRedoInProgress = false
     })
   } else {
@@ -1995,7 +1975,7 @@ const redo = () => {
     canvas.loadFromJSON(history[historyIndex], () => {
       canvas.renderAll()
       requestTextureUpdate()
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
       isUndoRedoInProgress = false
     })
   } else {
@@ -2014,7 +1994,7 @@ const deselectObject = () => {
   updateHasSelection() // Mettre à jour hasSelection
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 const deleteSelected = () => {
@@ -2032,7 +2012,7 @@ const deleteSelected = () => {
     updateHasSelection() // Mettre à jour hasSelection
     canvas.renderAll()
     requestTextureUpdate()
-    emit('design-updated', canvas)
+    canvasStore.markDesignUpdated()
     
     // Sauvegarder dans l'historique
     const json = JSON.stringify(canvas.toJSON())
@@ -2172,7 +2152,7 @@ const applyColorToSelection = () => {
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
   
 }
 
@@ -2232,9 +2212,9 @@ const applyRotation = () => {
   // Mettre à jour la liste des objets 2D après rotation
   updateObjectsList2D()
   
-  // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
+  // Notifier la rotation pour appliquer la rotation au modèle 3D
   if (!activeObject.userData?.isWorkZoneIndicator) {
-    emit('object-rotated', {
+    canvasStore.notifyObjectRotated({
       object: activeObject,
       angle: angle // Angle en degrés
     })
@@ -2242,7 +2222,7 @@ const applyRotation = () => {
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
   saveHistory()
   signalChange()
 }
@@ -2294,7 +2274,7 @@ const addSeamLine = () => {
     canvas.remove(existingSeam)
     canvas.renderAll()
     requestTextureUpdate()
-    emit('design-updated', canvas)
+    canvasStore.markDesignUpdated()
     return
   }
   
@@ -2329,7 +2309,7 @@ const addSeamLine = () => {
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
   
 }
 
@@ -2399,7 +2379,7 @@ const addGreenBand = () => {
   canvas.selection = true
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 const clearCanvas = () => {
@@ -2408,7 +2388,7 @@ const clearCanvas = () => {
   canvas.backgroundColor = 'transparent'
   canvas.renderAll()
   requestTextureUpdate() // Signal pour mettre à jour la texture 3D
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
   
   // Réinitialiser l'historique après avoir effacé
   history = []
@@ -2483,6 +2463,9 @@ const activatePlacementMode = (type) => {
     return
   }
   
+  // Ne pas mettre à jour le store ici car placeElementAt le fera à la fin
+  // On place directement l'élément sans activer le mode placement
+  
   // Calculer le centre du canvas en tenant compte de la zone de travail
   const topHeight = canvasHeight * props.workZoneTop
   const bottomHeight = canvasHeight * props.workZoneBottom
@@ -2531,7 +2514,7 @@ const placeElementAt = (type, x, y) => {
   
   // Désactiver le mode placement après placement
   placementMode.value = null
-  emit('placement-mode-changed', { active: false, type: null })
+  canvasStore.setPlacementMode(false, null, true) // skipCallback = true pour éviter la boucle
 }
 
 const placeCircleAt = (x, y) => {
@@ -2554,7 +2537,7 @@ const placeCircleAt = (x, y) => {
   canvas.selection = true
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 /**
  * Crée un rectangle centré à la position (x, y) et configure ses contrôles
@@ -2622,7 +2605,7 @@ const placeRectangleAt = (x, y) => {
   canvas.selection = true       // Activer la sélection d'objets
   canvas.renderAll()            // Rendre le canvas
   requestTextureUpdate()        // Demander la mise à jour de la texture 3D
-  emit('design-updated', canvas) // Notifier le composant parent que le design a changé
+  canvasStore.markDesignUpdated() // Notifier le composant parent que le design a changé
 }
 
 const placeTextAt = (x, y) => {
@@ -2644,7 +2627,7 @@ const placeTextAt = (x, y) => {
   canvas.selection = true
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 const placeImageAt = async (x, y) => {
@@ -2673,7 +2656,7 @@ const placeImageAt = async (x, y) => {
       canvas.selection = true
       canvas.renderAll()
       requestTextureUpdate()
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
       
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -3299,11 +3282,8 @@ const selectObjectAtPosition = (x, y) => {
     activateControlsForObject(targetObject)
     canvas.renderAll()
     
-    // Émettre l'événement de sélection
-    emit('object-selected', {
-      object: targetObject,
-      type: targetObject.type
-    })
+    // Mettre à jour l'objet sélectionné dans le store
+    canvasStore.setSelectedObject(targetObject, true) // skipCallback = true pour éviter la boucle
     
     return true
   }
@@ -3356,16 +3336,13 @@ const selectObjectAtPosition = (x, y) => {
       activateControlsForObject(targetObject)
       canvas.renderAll()
       
-      emit('object-selected', {
-        object: targetObject,
-        type: targetObject.type
-      })
+      canvasStore.setSelectedObject(targetObject, true) // skipCallback = true car le callback sera appelé depuis DesignStudio
       
       return true
     } else {
       canvas.discardActiveObject()
       canvas.renderAll()
-      emit('object-deselected')
+      canvasStore.setSelectedObject(null)
       return false
     }
   }
@@ -3467,10 +3444,7 @@ const selectObjectAtPosition = (x, y) => {
     activateControlsForObject(targetObject)
     canvas.renderAll()
     
-    emit('object-selected', {
-      object: targetObject,
-      type: targetObject.type
-    })
+    canvasStore.setSelectedObject(targetObject, true) // skipCallback = true pour éviter la boucle
     
     return true
   }
@@ -3478,7 +3452,7 @@ const selectObjectAtPosition = (x, y) => {
   canvas.discardActiveObject()
   updateHasSelection() // Mettre à jour hasSelection
   canvas.renderAll()
-  emit('object-deselected')
+  canvasStore.setSelectedObject(null, true) // skipCallback = true pour éviter la boucle
   
   return false
 }
@@ -3646,7 +3620,7 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 /**
@@ -3786,7 +3760,7 @@ const moveSelectedObject = (x, y) => {
     
     canvas.renderAll()
     requestTextureUpdate()
-    emit('design-updated', canvas)
+    canvasStore.markDesignUpdated()
   } else {
     // Si c'est l'original, déplacer normalement
     activeObject.set({
@@ -3802,13 +3776,13 @@ const moveSelectedObject = (x, y) => {
       activeObject.setCoords()
       canvas.renderAll()
       requestTextureUpdate()
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
     }).catch(() => {
       // En cas d'erreur, mettre à jour quand même
       activeObject.setCoords()
       canvas.renderAll()
       requestTextureUpdate()
-      emit('design-updated', canvas)
+      canvasStore.markDesignUpdated()
     })
   }
 }
@@ -3852,7 +3826,7 @@ const scaleSelectedObject = async (scaleFactor) => {
     
     canvas.renderAll()
     requestTextureUpdate()
-    emit('design-updated', canvas)
+    canvasStore.markDesignUpdated()
     return
   }
   
@@ -3899,7 +3873,7 @@ const scaleSelectedObject = async (scaleFactor) => {
   
   canvas.renderAll()
   requestTextureUpdate()
-  emit('design-updated', canvas)
+  canvasStore.markDesignUpdated()
 }
 
 /**

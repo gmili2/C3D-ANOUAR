@@ -105,29 +105,10 @@
           :enable-direct-edit="true"
           :work-zone-top="workZoneTop / 100"
           :work-zone-bottom="workZoneBottom / 100"
-          :placement-mode="placementMode"
-          :placement-type="placementType"
-          :drag-mode="dragMode"
-          :selected-object="selectedObject"
-          @model-loaded="onModelLoaded"
-          @model-error="onModelError"
-          @texture-ready="onTextureReady"
-          @3d-click="on3DClickForPlacement"
-          @3d-click-outside="on3DClickOutside"
-          @3d-rotation-click="on3DRotationClick"
-          @3d-rotation-start="on3DRotationStart"
-          @3d-rotation="on3DRotation"
-          @3d-rotation-end="on3DRotationEnd"
-          @3d-drag="on3DDrag"
-          @3d-drag-start="on3DDragStart"
-          @3d-drag-end="on3DDragEnd"
-          @3d-scale="on3DScale"
-          @3d-resize-start="on3DResizeStart"
-          @3d-resize="on3DResize"
-          @3d-resize-end="on3DResizeEnd"
-          @3d-hover="on3DHover"
-          @add-rectangle-click="onAddRectangleClick"
-          @detect-resize-handle="onDetectResizeHandle"
+          :placement-mode="canvasStore.placementMode"
+          :placement-type="canvasStore.placementType"
+          :drag-mode="canvasStore.dragMode"
+          :selected-object="canvasStore.selectedObject"
         />
       </div>
 
@@ -222,14 +203,6 @@
           :work-zone-top="workZoneTop / 100"
           :work-zone-bottom="workZoneBottom / 100"
           :update-texture-direct="() => threeSceneRef?.updateTextureDirect?.()"
-          @design-updated="onDesignUpdated"
-          @canvas-ready="onFabricCanvasReady"
-          @placement-mode-changed="onPlacementModeChanged"
-          @object-selected="onObjectSelected"
-          @object-deselected="onObjectDeselected"
-          @move-object="onMoveObject"
-          @objects-changed="updateAllObjectsList"
-          @object-rotated="onObjectRotated"
         />
       </div>
     </div>
@@ -250,8 +223,8 @@
     </div>
     
     <!-- Indicateur de mode placement -->
-    <div v-if="placementMode && placementType" class="placement-indicator">
-      🎯 Mode placement actif: {{ placementType === 'circle' ? 'Cercle' : placementType === 'rectangle' ? 'Rectangle' : placementType === 'text' ? 'Texte' : 'Image' }} - Cliquez sur le modèle 3D pour placer
+    <div v-if="canvasStore.placementMode && canvasStore.placementType" class="placement-indicator">
+      🎯 Mode placement actif: {{ canvasStore.placementType === 'circle' ? 'Cercle' : canvasStore.placementType === 'rectangle' ? 'Rectangle' : canvasStore.placementType === 'text' ? 'Texte' : 'Image' }} - Cliquez sur le modèle 3D pour placer
     </div>
     
     <!-- Indicateur de mode drag -->
@@ -269,11 +242,15 @@
  * pour gérer l'état et la logique de l'application de design 3D.
  */
 
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch, onUnmounted } from 'vue'
 import ThreeScene from './components/ThreeScene.vue'
 import FabricDesigner from './components/FabricDesigner.vue'
 import MeshSelector from './components/MeshSelector.vue'
+import { useCanvasStore } from './stores/canvasStore'
 import * as THREE from 'three'
+
+// ===== STORE PINIA =====
+const canvasStore = useCanvasStore()
 
 // ===== RÉFÉRENCES AUX COMPOSANTS ENFANTS =====
 // Références pour accéder aux méthodes exposées par les composants enfants
@@ -382,13 +359,10 @@ watch([gobletHeightCm, customizableHeightCm, customizablePosition], () => {
 })
 
 // ===== MODES D'INTERACTION =====
-const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
-const placementType = ref(null)   // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
-const dragMode = ref(false)       // Mode drag actif pour déplacer un objet sélectionné
+// Les modes sont maintenant gérés par le store Pinia
 const useDecalOptimization = ref(true)  // Activer/désactiver l'optimisation Decal pour la rotation
 const tempCanvasDataUrl = ref(null)  // URL de l'image du tempCanvas pour débogage
 const tempCanvasAngle = ref(0)  // Angle actuel de l'objet
-const isDragging = ref(false)    // Indique si on est en train de glisser un objet
 
 // ===== COMPUTED PROPERTIES (Propriétés calculées) =====
 /**
@@ -659,11 +633,11 @@ const on3DClickForPlacement = (clickData) => {
   // Fonctionnalité de point vert sur la couture supprimée
   
   // Si on est en mode placement, placer un nouvel élément
-  if (placementMode.value && placementType.value) {
+  if (canvasStore.placementMode && canvasStore.placementType) {
     
     // Placer l'élément sur le canvas 2D à la position correspondante du clic 3D
     if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
-      fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
+      fabricDesignerRef.value.placeElementAt(canvasStore.placementType, clickData.canvasX, clickData.canvasY)
       // Le mode placement sera désactivé automatiquement par placeElementAt
       // Mettre à jour la liste des objets après placement
       nextTick(() => {
@@ -678,13 +652,13 @@ const on3DClickForPlacement = (clickData) => {
     const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)
     if (found) {
       // Activer le mode drag après sélection pour pouvoir déplacer immédiatement
-      dragMode.value = true
+      canvasStore.setDragMode(true)
       if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
         threeSceneRef.value.setDragMode(true)
       }
     } else {
       // Désactiver le mode drag si aucun objet n'est trouvé
-      dragMode.value = false
+      canvasStore.setDragMode(false)
       if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
         threeSceneRef.value.setDragMode(false)
       }
@@ -734,7 +708,7 @@ const on3DRotationStart = (rotationData) => {
   skipped2DFrames = 0 // Réinitialiser le compteur
   
   // Activer le flag de rotation
-  isRotating.value = true
+  canvasStore.setRotating(true)
   
   
   // Activer le mode rotation dans FabricDesigner si mtrCoords est disponible
@@ -971,7 +945,7 @@ const on3DRotationEnd = () => {
   lastRotationAngle = 0
   
   // Désactiver le flag de rotation
-  isRotating.value = false
+  canvasStore.setRotating(false)
   
   // Mettre à jour les coordonnées de l'objet sélectionné pour actualiser la position du mtr
   if (fabricDesignerRef.value) {
@@ -1003,10 +977,9 @@ const onWorkZoneChanged = () => {
 }
 
 const onPlacementModeChanged = (modeData) => {
-  placementMode.value = modeData.active
-  placementType.value = modeData.type
-  
-  // Mettre à jour le curseur du modèle 3D si nécessaire
+  // Ne pas appeler setPlacementMode ici car cela créerait une boucle infinie
+  // Le mode est déjà mis à jour dans le store par FabricDesigner
+  // On met juste à jour ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
     threeSceneRef.value.setPlacementMode(modeData.active, modeData.type)
   }
@@ -1024,8 +997,7 @@ const onPlacementModeChanged = (modeData) => {
 const onAddRectangleClick = (data) => {
   if (data.active) {
     // Activer le mode placement de rectangle
-    placementMode.value = true
-    placementType.value = 'rectangle'
+    canvasStore.setPlacementMode(true, 'rectangle', true) // skipCallback = true car c'est un callback du store
     
     // Informer FabricDesigner du changement de mode
     if (fabricDesignerRef.value && fabricDesignerRef.value.activatePlacementMode) {
@@ -1038,8 +1010,7 @@ const onAddRectangleClick = (data) => {
     }
   } else {
     // Désactiver le mode placement
-    placementMode.value = false
-    placementType.value = null
+    canvasStore.setPlacementMode(false, null, true) // skipCallback = true car c'est un callback du store
     
     // Informer FabricDesigner de la désactivation
     if (fabricDesignerRef.value && fabricDesignerRef.value.deactivatePlacementMode) {
@@ -1057,8 +1028,10 @@ const onAddRectangleClick = (data) => {
 const selectedObject = ref(null)
 
 const onObjectSelected = (data) => {
-  selectedObject.value = data.object
-  dragMode.value = true
+  // Ne pas appeler setSelectedObject ici car cela créerait une boucle infinie
+  // L'objet est déjà mis à jour dans le store par FabricDesigner
+  // On met juste à jour les autres états
+  canvasStore.setDragMode(true)
   
   // Activer le mode drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
@@ -1075,9 +1048,11 @@ const onObjectSelected = (data) => {
 }
 
 const onObjectDeselected = () => {
-  selectedObject.value = null
-  dragMode.value = false
-  isDragging.value = false
+  // Ne pas appeler setSelectedObject ici car cela créerait une boucle infinie
+  // L'objet est déjà mis à jour dans le store par FabricDesigner
+  // On met juste à jour les autres états
+  canvasStore.setDragMode(false)
+  canvasStore.setDragging(false)
   
   // Désactiver le mode drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
@@ -1104,10 +1079,10 @@ const on3DClickOutside = () => {
     fabricDesignerRef.value.deselectObject()
   }
   
-  // Mettre à jour l'état local
-  selectedObject.value = null
-  dragMode.value = false
-  isDragging.value = false
+  // Mettre à jour l'état dans le store
+  canvasStore.setSelectedObject(null)
+  canvasStore.setDragMode(false)
+  canvasStore.setDragging(false)
   
   // Désactiver le mode drag dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
@@ -1219,7 +1194,7 @@ const dragOffset = ref({ x: 0, y: 0 })
  * @param {Object} clickData - Données du clic contenant canvasX, canvasY
  */
 const on3DDragStart = (clickData) => {
-  if (!dragMode.value) return
+  if (!canvasStore.dragMode) return
   
   // Vérifier que les coordonnées sont valides
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
@@ -1228,8 +1203,8 @@ const on3DDragStart = (clickData) => {
   }
   
   // C'est un déplacement normal (le resize a déjà été détecté par ThreeScene)
-  isDragging.value = true
-  isResizing.value = false
+  canvasStore.setDragging(true)
+  canvasStore.setResizing(false)
   
   console.log('✋ Début du DRAG (déplacement)')
   
@@ -1288,7 +1263,7 @@ const on3DDragStart = (clickData) => {
  * @param {Object} clickData - Données du clic contenant canvasX, canvasY
  */
 const on3DDrag = (clickData) => {
-  if (!dragMode.value || !isDragging.value || isResizing.value) return
+  if (!canvasStore.dragMode || !canvasStore.isDragging || canvasStore.isResizing) return
   
   // Vérifier que le clic est dans la zone active
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
@@ -1321,7 +1296,7 @@ const on3DHover = (hoverData) => {
   const activeObject = canvas?.getActiveObject()
   
   // Si aucun objet n'est sélectionné ou si dragMode n'est pas actif, réinitialiser
-  if (!activeObject || !dragMode.value) {
+  if (!activeObject || !canvasStore.dragMode) {
     // Réinitialiser le style
     // DÉSACTIVÉ: Pas besoin si highlightResizeHandle est désactivé
     // if (fabricDesignerRef.value.resetResizeHover) {
@@ -1337,7 +1312,7 @@ const on3DHover = (hoverData) => {
       // Remettre le curseur par défaut (move pour déplacement)
       if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
         const element = threeSceneRef.value.renderer().domElement
-        const defaultCursor = dragMode.value ? 'move' : 'default'
+        const defaultCursor = canvasStore.dragMode ? 'move' : 'default'
         element.style.setProperty('cursor', defaultCursor, 'important')
       }
     return
@@ -1447,7 +1422,7 @@ const on3DHover = (hoverData) => {
       // Changer le curseur selon le type de handle
       // Seulement si on n'est pas en train de draguer ou faire une rotation
       // (on permet le changement pendant le resize pour garder le bon curseur)
-      if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer() && !isDragging.value && !isRotating.value) {
+      if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer() && !canvasStore.isDragging && !canvasStore.isRotating) {
         let cursor = 'move' // Par défaut, curseur de déplacement
         
         if (handleInfo.corner) {
@@ -1529,8 +1504,8 @@ const on3DHover = (hoverData) => {
  * @param {Object} resizeData - Données contenant canvasX, canvasY, handleInfo
  */
 const on3DResizeStart = (resizeData) => {
-  isResizing.value = true
-  isDragging.value = false
+  canvasStore.setResizing(true)
+  canvasStore.setDragging(false)
   resizeStartPos.value = { x: resizeData.canvasX, y: resizeData.canvasY }
   currentResizeHandle.value = resizeData.handleInfo
   
@@ -1543,7 +1518,7 @@ const on3DResizeStart = (resizeData) => {
  * @param {Object} resizeData - Données contenant canvasX, canvasY, startX, startY, handleInfo
  */
 const on3DResize = (resizeData) => {
-  if (!dragMode.value || !isResizing.value) return
+  if (!canvasStore.dragMode || !canvasStore.isResizing) return
   
   // Vérifier que les coordonnées sont valides
   if (resizeData.canvasX === undefined || resizeData.canvasY === undefined || 
@@ -1582,7 +1557,7 @@ const on3DResizeEnd = () => {
   }
   currentHoveredHandle.value = null
   
-  isResizing.value = false
+  canvasStore.setResizing(false)
   resizeStartPos.value = { x: 0, y: 0 }
   currentResizeHandle.value = null
   
@@ -1599,7 +1574,7 @@ const on3DResizeEnd = () => {
   // Remettre le curseur normal (move pour déplacement)
   if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
     const element = threeSceneRef.value.renderer().domElement
-    const defaultCursor = dragMode.value ? 'move' : 'default'
+    const defaultCursor = canvasStore.dragMode ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }
 }
@@ -1608,7 +1583,7 @@ const on3DResizeEnd = () => {
  * Gère la fin du glissement sur le modèle 3D
  */
 const on3DDragEnd = () => {
-  isDragging.value = false
+  canvasStore.setDragging(false)
   
   // Réinitialiser le décalage
   dragOffset.value = { x: 0, y: 0 }
@@ -1628,7 +1603,7 @@ const on3DDragEnd = () => {
   // Remettre le curseur normal (move pour déplacement)
   if (threeSceneRef.value && threeSceneRef.value.renderer && threeSceneRef.value.renderer()) {
     const element = threeSceneRef.value.renderer().domElement
-    const defaultCursor = dragMode.value ? 'move' : 'default'
+    const defaultCursor = canvasStore.dragMode ? 'move' : 'default'
     element.style.setProperty('cursor', defaultCursor, 'important')
   }
 }
@@ -1643,7 +1618,7 @@ const on3DDragEnd = () => {
  */
 const on3DScale = (scaleData) => {
   // Vérifier qu'un objet est sélectionné (dragMode actif signifie qu'un objet est sélectionné)
-  if (!dragMode.value) return
+  if (!canvasStore.dragMode) return
   
   // Vérifier qu'il y a bien un objet sélectionné dans le canvas
   if (!fabricDesignerRef.value) return
@@ -1785,8 +1760,52 @@ const applyDesignToModel = async () => {
 // ===== CHARGEMENT PAR DÉFAUT DU MODÈLE =====
 /**
  * Charge le modèle par défaut au montage du composant
+ * et enregistre les callbacks dans le store
  */
 onMounted(async () => {
+  // Enregistrer les callbacks pour les événements 3D
+  canvasStore.register3DCallbacks({
+    on3DClick: on3DClickForPlacement,
+    on3DClickOutside: on3DClickOutside,
+    on3DRotationClick: on3DRotationClick,
+    on3DRotationStart: on3DRotationStart,
+    on3DRotation: on3DRotation,
+    on3DRotationEnd: on3DRotationEnd,
+    on3DDragStart: on3DDragStart,
+    on3DDrag: on3DDrag,
+    on3DDragEnd: on3DDragEnd,
+    on3DResizeStart: on3DResizeStart,
+    on3DResize: on3DResize,
+    on3DResizeEnd: on3DResizeEnd,
+    on3DHover: on3DHover,
+    on3DScale: on3DScale,
+    onDetectResizeHandle: onDetectResizeHandle,
+    onAddRectangleClick: onAddRectangleClick
+  })
+
+  // Enregistrer les callbacks pour les événements 2D
+  canvasStore.register2DCallbacks({
+    onDesignUpdated: onDesignUpdated,
+    onCanvasReady: onFabricCanvasReady,
+    onPlacementModeChanged: onPlacementModeChanged,
+    onObjectSelected: onObjectSelected,
+    onObjectDeselected: onObjectDeselected,
+    onMoveObject: onMoveObject,
+    onObjectsChanged: updateAllObjectsList,
+    onObjectRotated: onObjectRotated
+  })
+
+  // Enregistrer les callbacks pour les événements du modèle 3D
+  canvasStore.registerModelCallbacks({
+    onModelLoaded: onModelLoaded,
+    onModelError: onModelError,
+    onTextureReady: onTextureReady,
+    onMeshesExtracted: (meshes) => {
+      modelMeshes.value = meshes
+    }
+  })
+
+  // Charger le modèle par défaut
   try {
     // Charger le fichier downloadSvg3.obj par défaut
     // Utiliser un import dynamique avec Vite pour charger le fichier

@@ -1,116 +1,21 @@
-<!-- 
-  DesignStudio.vue - Composant principal de l'application
-  
-  Ce composant coordonne l'interaction entre :
-  - ThreeScene : Affiche le modèle 3D (OBJ) avec Three.js
-  - FabricDesigner : Permet de créer des designs 2D sur un canvas avec Fabric.js
-  
-  Fonctionnalités principales :
-  - Upload de modèles 3D (.obj)
-  - Synchronisation en temps réel entre le canvas 2D et la texture 3D
-  - Placement direct d'éléments sur le modèle 3D en cliquant
-  - Déplacement d'objets en glissant sur le modèle 3D
-  - Gestion des zones de travail (exclusion de zones haut/bas)
--->
+
 <template>
-  <span class="bg-red-500 text-white p-2 rounded">
-    Éléments sur le canvas: {{ canvasObjects.length }}
-    <span v-if="canvasObjects.length > 0" class="ml-2">
-      ({{ canvasObjects.map(obj => obj.type).join(', ') }})
-    </span>
-  </span>
   <div class="design-studio">
-    <!-- En-tête avec les actions principales -->
-    <div class="studio-header">
-      <h1>Studio de Design 3D</h1>
-      <div class="header-actions">
-        <!-- Lien vers l'exemple TresJS -->
-        <router-link to="/tres-example" class="upload-btn">
-          🎨 Exemple TresJS
-        </router-link>
-        <!-- Bouton pour uploader un fichier 3D (OBJ, GLB, GLTF) -->
-        <label for="obj-upload" class="upload-btn">
-          <input
-            id="obj-upload"
-            type="file"
-            accept=".obj,.glb,.gltf"
-            @change="handleFileUpload"
-            style="display: none;"
-          />
-          📁 Uploader un modèle 3D (.obj, .glb, .gltf)
-        </label>
-        <!-- Bouton pour basculer entre vue 2D et 3D -->
-        <button @click="toggleView" class="view-toggle-btn">
-          {{ currentView === '3d' ? '🎨 Vue 2D' : '🎯 Vue 3D' }}
-        </button>
-        <!-- Bouton pour ajouter une bande verte -->
-        <!-- <button @click="addGreenBand" class="upload-btn" :disabled="!hasModel">
-          🟢 Ajouter bande verte
-        </button> -->
-        <!-- Bouton pour afficher/masquer la couture en rouge -->
-        <button @click="toggleSeamLine" class="upload-btn" :disabled="!hasModel">
-          🔴 Afficher/Masquer couture
-        </button>
-        <!-- Bouton pour créer un gobelet sans couture -->
-        <button @click="createSeamlessGoblet" class="upload-btn" :disabled="!hasModel">
-          ✨ Créer gobelet sans couture
-        </button>
-        <!-- Bouton pour réduire la taille du modèle de 20% -->
-        <button @click="scaleDownModel" class="upload-btn" :disabled="!hasModel">
-          🔽 Réduire modèle 20%
-        </button>
-        <!-- Bouton pour activer/désactiver l'optimisation Decal -->
-        <button 
-          @click="useDecalOptimization = !useDecalOptimization" 
-          class="upload-btn"
-          :class="{ 'active': useDecalOptimization }"
-        >
-          {{ useDecalOptimization ? '⚡ Decal ON' : '🐢 Decal OFF' }}
-        </button>
-      </div>
-    </div>
-
-
     <div class="studio-content">
-      <!-- Vue 3D - Toujours visible en haut -->
       <div class="view-panel view-3d">
         <div class="panel-header">
           <h3>🎯 Vue 3D - Modèle</h3>
         </div>
-        
-        <!-- Affichage du tempCanvas pour débogage -->
-        <!-- <div class="temp-canvas-preview">
-           <div class="debug-rotation-preview">
-      </div>
-      image
-        <img :src="tempCanvasDataUrl" alt="Debug Preview" />
-
-          <div class="temp-canvas-header">
-            📸 TempCanvas (Decal) - Anglee: {{ tempCanvasAngle.toFixed(1) }}°
-          </div>
-          <img :src="tempCanvasDataUrl" alt="TempCanvas" />
-        </div> -->
-       <!-- DÉBOGAGE: Visualisation de l'image envoyée au shader -->
-      <div v-if="true" class="debug-rotation-preview">
+        <div v-if="true" class="debug-rotation-preview">
         <div class="debug-header">Preview Shader ({{ Math.round(tempCanvasAngle) }}°)</div>
         <img :src="tempCanvasDataUrl" alt="Debug Preview" />
       </div>
-
-      <!-- Canvas 3D -->
       <ThreeScene 
         ref="threeSceneRef"
-          :model-url="uploadedModel"
           :texture="appliedTexture"
           :canvas2D="fabricCanvasElement"
           :enable-direct-edit="true"
-          :work-zone-top="workZoneTop / 100"
-          :work-zone-bottom="workZoneBottom / 100"
-          :placement-mode="placementMode"
-          :placement-type="placementType"
           :drag-mode="dragMode"
-          :selected-object="selectedObject"
-          @model-loaded="onModelLoaded"
-          @model-error="onModelError"
           @texture-ready="onTextureReady"
           @3d-click="on3DClickForPlacement"
           @3d-click-outside="on3DClickOutside"
@@ -126,101 +31,15 @@
           @3d-resize="on3DResize"
           @3d-resize-end="on3DResizeEnd"
           @3d-hover="on3DHover"
-          @add-rectangle-click="onAddRectangleClick"
           @detect-resize-handle="onDetectResizeHandle"
         />
       </div>
 
-      <!-- Vue 2D - Toujours visible en bas -->
       <div class="view-panel view-2d">
-        <div class="panel-header">
-          <h3>🎨 Vue 2D - Canvas de Design</h3>
-        </div>
-        
-        <!-- Contrôles de zone de travail -->
-        <div class="work-zone-controls" v-if="hasModel">
-          <div class="control-group">
-            <label>Configuration de la zone personnalisable</label>
-            
-            <!-- <div class="config-section">
-              <label class="slider-label">
-                Hauteur totale du gobelet (cm):
-                <input 
-                  type="number" 
-                  v-model.number="gobletHeightCm" 
-                  min="1" 
-                  max="50" 
-                  step="0.5"
-                  @input="updateWorkZones"
-                />
-                cm
-              </label>
-              <label class="slider-label">
-                Zone personnalisable (cm):
-                <input 
-                  type="number" 
-                  v-model.number="customizableHeightCm" 
-                  min="1" 
-                  max="50" 
-                  step="0.5"
-                  @input="updateWorkZones"
-                />
-                cm
-              </label>
-              <label class="slider-label">
-                Position:
-                <select v-model="customizablePosition" @change="updateWorkZones">
-                  <option value="center">Centrée</option>
-                  <option value="top">En haut</option>
-                  <option value="bottom">En bas</option>
-                </select>
-              </label>
-            </div> -->
-            
-            <!-- Afficage des zones calculées -->
-            <!-- <div class="slider-group">
-              <label class="slider-label">
-                Exclure haut:
-                <input 
-                  type="range" 
-                  v-model.number="workZoneTop" 
-                  min="0" 
-                  max="50" 
-                  step="1"
-                  @input="onWorkZoneChanged"
-                />
-                {{ workZoneTop }}%
-              </label>
-              <label class="slider-label">
-                Exclure bas:
-                <input 
-                  type="range" 
-                  v-model.number="workZoneBottom" 
-                  min="0" 
-                  max="50" 
-                  step="1"
-                  @input="onWorkZoneChanged"
-                />
-                {{ workZoneBottom }}%
-              </label>
-            </div>
-            <div class="zone-info">
-              <strong>Zone active:</strong> {{ 100 - workZoneTop - workZoneBottom }}% 
-              ({{ customizableHeightCm }} cm sur {{ gobletHeightCm }} cm)
-              <br>
-              <small>{{ workZoneTop }}% haut exclu, {{ workZoneBottom }}% bas exclu</small>
-              <br>
-              <small><strong>Canvas 2D:</strong> {{ canvasWidth }}x{{ canvasHeight }} pixels (correspond à {{ customizableHeightCm }} cm)</small>
-            </div> -->
-          </div>
-        </div>
-        <pre> {{ canvasHeight }}</pre>
         <FabricDesigner
           ref="fabricDesignerRef"
           :canvas-width="500"
           :canvas-height="500"
-          :work-zone-top="workZoneTop / 100"
-          :work-zone-bottom="workZoneBottom / 100"
           :update-texture-direct="() => threeSceneRef?.updateTextureDirect?.()"
           @design-updated="onDesignUpdated"
           @canvas-ready="onFabricCanvasReady"
@@ -233,155 +52,23 @@
         />
       </div>
     </div>
-
-    <!-- Mesh Selector Panel -->
-    <MeshSelector
-      v-if="showMeshSelector"
-      :show="showMeshSelector"
-      :meshes="modelMeshes"
-      @close="showMeshSelector = false"
-      @select-mesh="onMeshSelected"
-      @highlight-mesh="onMeshHighlighted"
-      @edit-mesh="onMeshEdit"
-    />
-
-    <div v-if="errorMessage" class="error-message">
-      ⚠️ {{ errorMessage }}
-    </div>
-    
-    <!-- Indicateur de mode placement -->
-    <div v-if="placementMode && placementType" class="placement-indicator">
-      🎯 Mode placement actif: {{ placementType === 'circle' ? 'Cercle' : placementType === 'rectangle' ? 'Rectangle' : placementType === 'text' ? 'Texte' : 'Image' }} - Cliquez sur le modèle 3D pour placer
-    </div>
-    
-    <!-- Indicateur de mode drag -->
-    <!-- <div v-if="dragMode" class="drag-indicator">
-      🖱️ Mode drag actif - Sélectionnez un élément sur le canvas 2D puis glissez-le sur le modèle 3D
-    </div> -->
   </div>
 </template>
 
 <script setup>
-/**
- * SCRIPT SETUP - Configuration principale du composant
- * 
- * Ce composant utilise Vue 3 Composition API avec <script setup>
- * pour gérer l'état et la logique de l'application de design 3D.
- */
-
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import ThreeScene from './components/ThreeScene.vue'
 import FabricDesigner from './components/FabricDesigner.vue'
-import MeshSelector from './components/MeshSelector.vue'
 import * as THREE from 'three'
 
-// ===== RÉFÉRENCES AUX COMPOSANTS ENFANTS =====
-// Références pour accéder aux méthodes exposées par les composants enfants
 const threeSceneRef = ref(null)      // Référence au composant ThreeScene (affichage 3D)
 const fabricDesignerRef = ref(null)  // Référence au composant FabricDesigner (canvas 2D)
-
-// ===== ÉTAT DE L'APPLICATION =====
-const uploadedModel = ref(null)              // Fichier OBJ uploadé par l'utilisateur
 const appliedTexture = ref(null)            // Texture Three.js appliquée sur le modèle 3D
-const showDesigner = ref(true)               // Afficher/masquer le panneau de design (déprécié, utiliser currentView)
-const currentView = ref('3d')                // Vue actuelle: '2d' ou '3d'
-const errorMessage = ref('')                 // Message d'erreur à afficher
 const realTimeUpdateEnabled = ref(true)      // Activer/désactiver les mises à jour en temps réel
 let updateTextureTimeout = null              // Timeout pour debounce les mises à jour de texture
 const fabricCanvasElement = ref(null)        // Référence au canvas HTML Fabric.js (pour la texture partagée)
-const showMeshSelector = ref(false)          // Afficher/masquer le sélecteur de meshes
-const modelMeshes = ref([])                  // Liste de tous les meshes du modèle 3D
-const selectedMesh = ref(null)               // Mesh actuellement sélectionné
 const canvasObjects = ref([])                // Liste de tous les objets sur le canvas Fabric
 
-// ===== CONFIGURATION DES ZONES DE TRAVAIL =====
-// Ces valeurs définissent les zones du canvas où on ne peut pas placer d'éléments
-// Utile pour exclure certaines parties du modèle (manches, col, etc.)
-
-// Configuration pour personnaliser seulement une zone spécifique (ex: 8 cm)
-const gobletHeightCm = ref(12)        // Hauteur totale du gobelet en cm (à ajuster selon votre modèle)
-const customizableHeightCm = ref(8)   // Hauteur de la zone personnalisable en cm
-const customizablePosition = ref('center') // Position: 'center', 'top', 'bottom'
-
-// Calcul automatique des zones de travail basé sur les dimensions réelles
-const calculateWorkZones = () => {
-  const totalHeight = gobletHeightCm.value
-  const customizableHeight = customizableHeightCm.value
-  
-  if (customizableHeight >= totalHeight) {
-    // Si la zone personnalisable est plus grande que le gobelet, tout est personnalisable
-    return { top: 0, bottom: 0 }
-  }
-  
-  const excludedHeight = totalHeight - customizableHeight
-  
-  if (customizablePosition.value === 'center') {
-    // Zone centrée : exclure équitablement le haut et le bas
-    const topExcluded = excludedHeight / 2
-    const bottomExcluded = excludedHeight / 2
-    return {
-      top: (topExcluded / totalHeight) * 100,
-      bottom: (bottomExcluded / totalHeight) * 100
-    }
-  } else if (customizablePosition.value === 'top') {
-    // Zone en haut : exclure seulement le bas
-    return {
-      top: 0,
-      bottom: (excludedHeight / totalHeight) * 100
-    }
-  } else {
-    // Zone en bas : exclure seulement le haut
-    return {
-      top: (excludedHeight / totalHeight) * 100,
-      bottom: 0
-    }
-  }
-}
-
-const workZoneTop = ref(10)      // Pourcentage à exclure du haut (calculé automatiquement)
-const workZoneBottom = ref(10)  // Pourcentage à exclure du bas (calculé automatiquement)
-
-// Calculer la hauteur du canvas basée sur la zone personnalisable
-// Le canvas doit avoir une hauteur proportionnelle à la zone personnalisable
-// Réduire la hauteur pour que les éléments apparaissent à la bonne taille en 3D
-const canvasHeight = computed(() => {
-  // Hauteur de base du canvas (800x600)
-  // Réduire la hauteur de base pour que les éléments ne soient pas trop grands en 3D
-  const baseHeight = 400  // Réduit de 600 à 400 pour mieux correspondre à la vue 3D
-  const baseWidth = 800
-  
-  // Calculer le ratio de la zone personnalisable par rapport à la hauteur totale
-  const customizableRatio = customizableHeightCm.value / gobletHeightCm.value
-  
-  // La hauteur du canvas correspond à la zone personnalisable
-  // On garde une hauteur minimale pour que le canvas reste utilisable
-  const minHeight = 200
-  const calculatedHeight = Math.max(minHeight, baseHeight * customizableRatio)
-  
-  return Math.round(calculatedHeight)
-})
-
-// Largeur du canvas (peut être ajustée si nécessaire)
-const canvasWidth = computed(() => {
-  return 800 // Largeur fixe pour l'instant
-})
-
-// Calculer les zones initiales
-const updateWorkZones = () => {
-  const zones = calculateWorkZones()
-  workZoneTop.value = Math.round(zones.top)
-  workZoneBottom.value = Math.round(zones.bottom)
-}
-
-// Initialiser les zones
-updateWorkZones()
-
-// Watch pour mettre à jour automatiquement les zones quand les paramètres changent
-watch([gobletHeightCm, customizableHeightCm, customizablePosition], () => {
-  updateWorkZones()
-})
-
-// ===== MODES D'INTERACTION =====
 const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
 const placementType = ref(null)   // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
 const dragMode = ref(false)       // Mode drag actif pour déplacer un objet sélectionné
@@ -390,282 +77,23 @@ const tempCanvasDataUrl = ref(null)  // URL de l'image du tempCanvas pour débog
 const tempCanvasAngle = ref(0)  // Angle actuel de l'objet
 const isDragging = ref(false)    // Indique si on est en train de glisser un objet
 
-// ===== COMPUTED PROPERTIES (Propriétés calculées) =====
-/**
- * Vérifie si un modèle 3D est chargé
- */
-const hasModel = computed(() => uploadedModel.value !== null)
-
-let highlightedMeshIndex = ref(-1)  // Index du mesh actuellement mis en évidence
-
-/**
- * Vérifie si le canvas 2D contient des objets (design)
- */
-const hasDesign = computed(() => {
-  if (!fabricDesignerRef.value || !fabricDesignerRef.value.getCanvas) return false
-  const canvas = fabricDesignerRef.value.getCanvas()
-  return canvas && canvas.getObjects().length > 0
-})
-
-// ===== GESTION DE L'UPLOAD DE FICHIERS =====
-/**
- * Gère l'upload d'un fichier OBJ
- * Valide le format et réinitialise la texture si nécessaire
- * 
- * @param {Event} event - Événement de changement de fichier
- */
-const handleFileUpload = async (event) => {
-  const file = event.target.files?.[0]
-  if (!file) return
-
-  // Validation : vérifier que c'est bien un fichier 3D supporté
-  const fileName = file.name.toLowerCase()
-  const supportedFormats = ['.obj', '.glb', '.gltf']
-  const isValidFormat = supportedFormats.some(format => fileName.endsWith(format))
-  
-  if (!isValidFormat) {
-    errorMessage.value = 'Veuillez sélectionner un fichier .obj, .glb ou .gltf'
-    setTimeout(() => {
-      errorMessage.value = ''
-    }, 3000)
-    return
-  }
-
-  errorMessage.value = ''
-  uploadedModel.value = file
-
-  // Réinitialiser la texture appliquée quand un nouveau modèle est chargé
-  // pour éviter les conflits de textures
-  if (appliedTexture.value) {
-    appliedTexture.value.dispose()
-    appliedTexture.value = null
-  }
-}
-
-// ===== GESTION DU CHARGEMENT DU MODÈLE 3D =====
-/**
- * Callback appelé quand un modèle 3D est chargé avec succès
- * 
- * Cette fonction :
- * 1. Extrait tous les meshes du modèle
- * 2. Vérifie la présence de coordonnées UV (nécessaires pour les textures)
- * 3. Configure la texture partagée entre le canvas 2D et le modèle 3D
- * 
- * @param {THREE.Object3D} mesh - Le modèle 3D chargé (groupe de meshes)
- */
-const onModelLoaded = async (mesh) => {
-  errorMessage.value = ''
-  
-  // Extraire tous les meshes individuels du modèle pour l'inspection/édition
-  extractModelMeshes(mesh)
-  
-  // Vérifier si les meshes ont des coordonnées UV
-  // Les UVs sont nécessaires pour mapper la texture 2D sur la surface 3D
-  let hasUVs = true
-  mesh.traverse((child) => {
-    if (child instanceof THREE.Mesh && child.geometry) {
-      if (!child.geometry.attributes.uv) {
-        hasUVs = false
-      }
-    }
-  })
-  
-  if (!hasUVs) {
-    // Les UVs seront générées automatiquement dans ThreeScene
-  }
-  
-  // Attendre que le canvas Fabric.js soit prêt (rendu Vue)
-  await nextTick()
-  
-  // Récupérer le canvas HTML depuis Fabric.js pour créer la texture partagée
-  if (fabricDesignerRef.value) {
-    const fabricCanvas = fabricDesignerRef.value.getCanvas()
-    if (fabricCanvas) {
-      const htmlCanvas = fabricCanvas.getElement()
-      if (htmlCanvas) {
-        fabricCanvasElement.value = htmlCanvas
-        
-        // Attendre un peu pour que les UVs soient générées si nécessaire
-        await nextTick()
-        
-        // Configurer la texture partagée dans ThreeScene
-        // Cette texture lie le canvas 2D au modèle 3D pour un rendu en temps réel
-        if (threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
-          threeSceneRef.value.setupSharedCanvasTexture(htmlCanvas)
-        }
-      }
-    }
-  }
-  
-  // Mettre à jour la liste de tous les objets
-  updateAllObjectsList()
-}
-
-/**
- * Extrait tous les meshes individuels d'un modèle 3D
- * 
- * Parcourt récursivement l'objet 3D et collecte tous les meshes
- * avec leurs informations (nom, nombre de vertices, présence d'UVs, matériau)
- * 
- * @param {THREE.Object3D} obj - Le modèle 3D à analyser
- */
-const extractModelMeshes = (obj) => {
-  modelMeshes.value = []
-  let index = 0
-  
-  // Parcourir récursivement tous les enfants du modèle
-  obj.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      const geometry = child.geometry
-      // Compter les vertices (points 3D)
-      const vertexCount = geometry.attributes.position ? geometry.attributes.position.count : 0
-      // Vérifier la présence de coordonnées UV
-      const hasUVs = geometry.attributes.uv ? true : false
-      
-      // Stocker les informations du mesh
-      modelMeshes.value.push({
-        index: index++,
-        mesh: child,
-        name: child.name || `Mesh_${index}`,
-        vertexCount: vertexCount,
-        hasUVs: hasUVs,
-        material: child.material
-      })
-    }
-  })
-}
-
-const onMeshSelected = ({ index, mesh }) => {
-  if (index === -1) {
-    selectedMesh.value = null
-    // Sélectionner tous les meshes
-    if (threeSceneRef.value && threeSceneRef.value.highlightAllMeshes) {
-      threeSceneRef.value.highlightAllMeshes()
-    }
-  } else {
-    selectedMesh.value = mesh
-    // Highlight le mesh sélectionné
-    if (threeSceneRef.value && threeSceneRef.value.highlightMesh) {
-      threeSceneRef.value.highlightMesh(mesh)
-    }
-  }
-}
-
-const onMeshHighlighted = ({ index, mesh }) => {
-  // Toggle highlight
-  const isCurrentlyHighlighted = highlightedMeshIndex.value === index
-  highlightedMeshIndex.value = isCurrentlyHighlighted ? -1 : index
-  
-  // Highlight/unhighlight
-  if (threeSceneRef.value && threeSceneRef.value.highlightMesh) {
-    threeSceneRef.value.highlightMesh(mesh, !isCurrentlyHighlighted)
-  }
-}
-
-const onMeshEdit = ({ index, mesh }) => {
-  selectedMesh.value = mesh
-  // Configurer l'édition pour ce mesh spécifique
-  if (threeSceneRef.value && threeSceneRef.value.setActiveMesh) {
-    threeSceneRef.value.setActiveMesh(mesh)
-  }
-}
 
 const onTextureReady = (texture) => {
   appliedTexture.value = texture
 }
 
-// ===== GESTION DES INTERACTIONS 3D =====
-/**
- * Gère le clic sur le modèle 3D pour placer un élément directement
- * 
- * Quand l'utilisateur clique sur le modèle 3D en mode placement,
- * les coordonnées 3D sont converties en coordonnées 2D du canvas
- * et l'élément est placé à cette position.
- * 
- * @param {Object} clickData - Données du clic contenant canvasX, canvasY, etc.
- */
-// const addGreenBand = () => {
-//   if (!fabricDesignerRef.value || !fabricDesignerRef.value.addGreenBand) {
-//     console.warn('FabricDesigner non disponible')
-//     return
-//   }
-  
-//   fabricDesignerRef.value.addGreenBand()
-//   nextTick(() => {
-//     updateAllObjectsList()
-//   })
-// }
-
-/**
- * Affiche ou masque la ligne de couture en rouge
- */
-const toggleSeamLine = () => {
-  if (!fabricDesignerRef.value || !fabricDesignerRef.value.addSeamLine) {
-    return
-  }
-  
-  fabricDesignerRef.value.addSeamLine()
-  nextTick(() => {
-    updateAllObjectsList()
-  })
-}
-
-const createSeamlessGoblet = () => {
-  if (!threeSceneRef.value || !threeSceneRef.value.createSeamlessGoblet) {
-    return
-  }
-  
-  const success = threeSceneRef.value.createSeamlessGoblet()
-  if (success) {
-    // Réappliquer la texture du canvas si elle existe
-    if (fabricCanvasElement.value && threeSceneRef.value.setupSharedCanvasTexture) {
-      nextTick(() => {
-        threeSceneRef.value.setupSharedCanvasTexture(fabricCanvasElement.value)
-      })
-    }
-  } else {
-    errorMessage.value = 'Erreur lors de la création du gobelet sans couture'
-    setTimeout(() => {
-      errorMessage.value = ''
-    }, 3000)
-  }
-}
-
-/**
- * Réduit la taille du modèle 3D actuellement chargé de 20%
- */
-const scaleDownModel = () => {
-  if (!threeSceneRef.value || !threeSceneRef.value.scaleModel) {
-    return
-  }
-  
-  // Réduire de 20% (multiplier par 0.8)
-  threeSceneRef.value.scaleModel(0.8)
-}
 
 const on3DClickForPlacement = (clickData) => {
-  // Vérifier que le clic est dans la zone active (pas null)
-  // Les clics hors zone retournent null
   if (clickData.canvasX === undefined || clickData.canvasY === undefined || 
       clickData.canvasX === null || clickData.canvasY === null) {
     return
   }
   
-  // Vérifier si le clic est sur la couture (U proche de 0 ou 1)
-  const seamThreshold = 0.01 // Tolérance de 1% pour détecter la couture
-  const uvU = clickData.uv?.x || 0
-  const isOnSeam = uvU < seamThreshold || uvU > (1 - seamThreshold)
-  
-  // Fonctionnalité de point vert sur la couture supprimée
-  
   // Si on est en mode placement, placer un nouvel élément
   if (placementMode.value && placementType.value) {
     
-    // Placer l'élément sur le canvas 2D à la position correspondante du clic 3D
     if (fabricDesignerRef.value && fabricDesignerRef.value.placeElementAt) {
       fabricDesignerRef.value.placeElementAt(placementType.value, clickData.canvasX, clickData.canvasY)
-      // Le mode placement sera désactivé automatiquement par placeElementAt
-      // Mettre à jour la liste des objets après placement
       nextTick(() => {
         updateAllObjectsList()
       })
@@ -673,11 +101,6 @@ const on3DClickForPlacement = (clickData) => {
     return
   }
   
-  // ========================================================================
-  // VÉRIFICATION: CLIC SUR UN OBJET EXISTANT OU ZONE VIDE ?
-  // ========================================================================
-  // Si le flag checkForObject est présent, on doit vérifier s'il y a un objet
-  // à cette position. Si aucun objet n'est trouvé, on désélectionne tout.
   if (clickData.checkForObject && fabricDesignerRef.value) {
     const canvas = fabricDesignerRef.value.getCanvas()
     if (canvas) {
@@ -734,10 +157,7 @@ const on3DClickForPlacement = (clickData) => {
   }
 }
 
-/**
- * Gère le clic sur le contrôle de rotation (mtr) dans la vue 3D
- * Active la rotation de l'élément sélectionné dans le canvas 2D
- */
+
 const on3DRotationClick = (clickData) => {
   if (!fabricDesignerRef.value) return
   
@@ -753,14 +173,10 @@ const on3DRotationClick = (clickData) => {
   }
 }
 
-// Variable pour stocker l'angle initial de l'objet au début de la rotation
 let rotationInitialAngle = 0
 let lastRotationAngle = 0 // Stocker le dernier angle calculé pour l'appliquer à la fin
 let skipped2DFrames = 0 // Compteur pour les frames 2D sautées (optimisation)
 
-/**
- * Gère le début de la rotation depuis le contrôle de rotation (mtr) dans la vue 3D
- */
 const on3DRotationStart = (rotationData) => {
   console.log('🟣 DesignStudio: on3DRotationStart', rotationData);
   if (!fabricDesignerRef.value) return
@@ -851,10 +267,7 @@ const on3DRotationStart = (rotationData) => {
   }  // Fin de if (threeSceneRef.value && ...)
 }  // Fin de on3DRotationStart
 
-/**
- * Gère la rotation en cours depuis le contrôle de rotation (mtr) dans la vue 3D
- * Applique la rotation à l'élément dans le canvas 2D
- */
+
 const on3DRotation = (rotationData) => {
   console.log('on3DRotation',rotationData);
   if (!fabricDesignerRef.value) return
@@ -1030,19 +443,7 @@ const on3DRotationEnd = () => {
   }
 }
 
-const onModelError = (error) => {
-  errorMessage.value = `Erreur lors du chargement: ${error.message}`
-  uploadedModel.value = null
-  workZoneTop.value = 10
-  workZoneBottom.value = 10
-}
 
-const onWorkZoneChanged = () => {
-  // Notifier ThreeScene et FabricDesigner du changement
-  if (threeSceneRef.value && threeSceneRef.value.updateWorkZone) {
-    threeSceneRef.value.updateWorkZone(workZoneTop.value / 100, workZoneBottom.value / 100)
-  }
-}
 
 const onPlacementModeChanged = (modeData) => {
   placementMode.value = modeData.active
@@ -1054,48 +455,6 @@ const onPlacementModeChanged = (modeData) => {
   }
 }
 
-/**
- * Gère le clic sur le bouton "+ Rectangle" dans la vue 3D
- * 
- * Cette fonction active ou désactive le mode placement de rectangle.
- * Quand le mode est actif, l'utilisateur peut cliquer sur le modèle 3D
- * pour placer un rectangle à la position cliquée.
- * 
- * @param {Object} data - Données de l'événement { active: boolean }
- */
-const onAddRectangleClick = (data) => {
-  if (data.active) {
-    // Activer le mode placement de rectangle
-    placementMode.value = true
-    placementType.value = 'rectangle'
-    
-    // Informer FabricDesigner du changement de mode
-    if (fabricDesignerRef.value && fabricDesignerRef.value.activatePlacementMode) {
-      fabricDesignerRef.value.activatePlacementMode('rectangle')
-    }
-    
-    // Mettre à jour le mode dans ThreeScene
-    if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
-      threeSceneRef.value.setPlacementMode(true, 'rectangle')
-    }
-  } else {
-    // Désactiver le mode placement
-    placementMode.value = false
-    placementType.value = null
-    
-    // Informer FabricDesigner de la désactivation
-    if (fabricDesignerRef.value && fabricDesignerRef.value.deactivatePlacementMode) {
-      fabricDesignerRef.value.deactivatePlacementMode()
-    }
-    
-    // Mettre à jour le mode dans ThreeScene
-    if (threeSceneRef.value && threeSceneRef.value.setPlacementMode) {
-      threeSceneRef.value.setPlacementMode(false, null)
-    }
-  }
-}
-
-// Variable pour stocker l'objet sélectionné
 const selectedObject = ref(null)
 
 const onObjectSelected = (data) => {
@@ -1135,10 +494,7 @@ const onObjectDeselected = () => {
   updateAllObjectsList()
 }
 
-/**
- * Gère le clic en dehors du modèle 3D
- * Désélectionne l'objet actuellement sélectionné
- */
+
 const on3DClickOutside = () => {
   
   // Désélectionner l'objet dans FabricDesigner
@@ -1162,9 +518,6 @@ const on3DClickOutside = () => {
   }
 }
 
-/**
- * Met à jour la liste de tous les objets dans ThreeScene
- */
 const updateAllObjectsList = () => {
   if (!fabricDesignerRef.value || !fabricDesignerRef.value.getCanvas) return
   
@@ -1240,15 +593,12 @@ const onDetectResizeHandle = (data) => {
   }
 }
 
-// Variables pour le redimensionnement
 const isResizing = ref(false)
 const resizeStartPos = ref({ x: 0, y: 0 })
 const currentResizeHandle = ref(null)
 
-// Variable pour la rotation
 const isRotating = ref(false)
 
-// Variables pour le drag - stocker le décalage initial entre le clic et l'objet
 const dragStartPos = ref({ x: 0, y: 0 })
 const dragOffset = ref({ x: 0, y: 0 })
 
@@ -1704,7 +1054,7 @@ const on3DScale = (scaleData) => {
 const onDesignUpdated = () => {
   // Avec le nouveau système, la mise à jour est automatique via le store
   // On garde l'ancien système en fallback si nécessaire
-  if (!realTimeUpdateEnabled.value && hasModel.value) {
+  if (!realTimeUpdateEnabled.value) {
     updateTextureRealTime()
   }
 }
@@ -1713,7 +1063,7 @@ const onFabricCanvasReady = (htmlCanvas) => {
   fabricCanvasElement.value = htmlCanvas
   
   // Si le modèle est déjà chargé, configurer la texture partagée
-  if (hasModel.value && threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
+  if (threeSceneRef.value && threeSceneRef.value.setupSharedCanvasTexture) {
     threeSceneRef.value.setupSharedCanvasTexture(htmlCanvas)
   }
   
@@ -1761,93 +1111,7 @@ const updateTextureRealTime = () => {
   }, 200) // Debounce de 200ms pour laisser le temps au canvas de se rendre
 }
 
-// ===== GESTION DE LA NAVIGATION ENTRE VUES =====
-/**
- * Bascule entre la vue 2D et la vue 3D
- * Chaque vue prend 100% de l'écran quand elle est active
- */
-const toggleView = () => {
-  // Réinitialiser l'état de rotation avant de changer de vue
-  if (threeSceneRef.value && threeSceneRef.value.resetRotationState) {
-    threeSceneRef.value.resetRotationState()
-  }
-  
-  currentView.value = currentView.value === '3d' ? '2d' : '3d'
-  // Maintenir la compatibilité avec showDesigner
-  showDesigner.value = currentView.value === '2d'
-}
-
-const toggleDesigner = () => {
-  // Si on toggle le designer, on passe en vue 2D
-  if (!showDesigner.value) {
-    currentView.value = '2d'
-  }
-  showDesigner.value = !showDesigner.value
-}
-
-const applyDesignToModel = async () => {
-  if (!fabricDesignerRef.value || !threeSceneRef.value) {
-    errorMessage.value = 'Composants non initialisés'
-    return
-  }
-
-  const canvasTexture = fabricDesignerRef.value.getCanvasAsTexture()
-  if (!canvasTexture) {
-    errorMessage.value = 'Impossible de créer la texture depuis le canvas'
-    return
-  }
-
-  try {
-    // Dispose old texture if exists
-    if (appliedTexture.value) {
-      appliedTexture.value.dispose()
-    }
-
-    // Create Three.js texture from canvas
-    const texture = new THREE.CanvasTexture(canvasTexture)
-    texture.flipY = false
-    texture.needsUpdate = true
-    texture.format = THREE.RGBAFormat
-
-    // Apply texture
-    appliedTexture.value = texture
-    
-    // Also use the method from ThreeScene component
-    if (threeSceneRef.value.applyTexture) {
-      await nextTick()
-      threeSceneRef.value.applyTexture(texture)
-    }
-
-    errorMessage.value = ''
-  } catch (error) {
-    errorMessage.value = `Erreur: ${error.message}`
-  }
-}
-
-// ===== CHARGEMENT PAR DÉFAUT DU MODÈLE =====
-/**
- * Charge le modèle par défaut au montage du composant
- */
 onMounted(async () => {
-  try {
-    // Charger le fichier downloadSvg3.obj par défaut
-    // Utiliser un import dynamique avec Vite pour charger le fichier
-    const objUrl = new URL('./downloadSvgGoblet.obj', import.meta.url)
-    
-    const response = await fetch(objUrl)
-    if (!response.ok) {
-      return
-    }
-    
-    const blob = await response.blob()
-    const file = new File([blob], 'downloadSvg3.obj', { type: 'model/obj' })
-    
-    // Attendre un peu pour que les composants soient prêts
-    await nextTick()
-    
-    uploadedModel.value = file
-  } catch (error) {
-  }
 })
 </script>
 

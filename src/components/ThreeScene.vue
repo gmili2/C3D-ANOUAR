@@ -46,71 +46,8 @@ import { get3DPositionFromUV } from '../composables/use2DTo3DProjection'
 import { TresCanvas, useTres } from '@tresjs/core'
 import { OrbitControls } from '@tresjs/cientos'
 
-interface CoordinatesDisplay {
-  show: boolean
-  uvU: number
-  uvV: number
-  canvasX: number
-  canvasY: number
-  worldPos: { x: number; y: number; z: number } | null
-  isOnSeam: boolean
-  isOnRotationHandle: boolean
-}
 
-interface SelectedObjectCoords {
-  show: boolean
-  type: string
-  left: number
-  top: number
-  width: number
-  height: number
-  scaleX: number
-  scaleY: number
-  angle: number
-  opacity: number
-  controls: Record<string, { x: number; y: number }>
-  originX: string
-  originY: string
-}
-
-interface DetectedControl {
-  show: boolean
-  handle: string | null
-  corner: string | null
-  edge: string | null
-  isRotation: boolean
-  distance: number | null
-  x: number | null
-  y: number | null
-}
-
-interface MeshInfo {
-  index: number
-  mesh: THREE.Mesh
-  name: string
-  vertexCount: number
-  hasUVs: boolean
-  uvRange?: { minU: number; maxU: number; range: number } | null
-}
-
-interface CanvasObjectItem {
-  id: string
-  type: string
-  left: number
-  top: number
-  width: number
-  height: number
-  opacity: number
-  isSelected: boolean
-  controls: Record<string, { x: number; y: number }>
-  centerX: number
-  centerY: number
-}
 const props = defineProps({
-  modelUrl: {
-    type: [String, File] as PropType<string | File | null>,
-    default: null
-  },
   texture: {
     type: Object as PropType<THREE.Texture | null>,
     default: null
@@ -201,7 +138,6 @@ let renderer: THREE.WebGLRenderer | null = null
 let controls: ThreeOrbitControls | null = null
 let animationId: number | null = null
 let handleResize: (() => void) | null = null
-let tresContext: any = null
 
 let shaderUniforms = {
   uDecalMap: { value: null as THREE.Texture | null },
@@ -210,20 +146,19 @@ let shaderUniforms = {
   uDecalScale: { value: new THREE.Vector2(1, 1) },
   uDecalAngle: { value: 0 }
 }
-let isMaterialPatched = false
 
-const coordinatesDisplay = ref<CoordinatesDisplay>({
+const coordinatesDisplay = ref({
   show: false,
   uvU: 0,
   uvV: 0,
   canvasX: 0,
   canvasY: 0,
-  worldPos: null,
+  worldPos: null as { x: number; y: number; z: number } | null,
   isOnSeam: false,
   isOnRotationHandle: false
 })
 
-const selectedObjectCoords = ref<SelectedObjectCoords>({
+const selectedObjectCoords = ref({
   show: false,
   type: '',
   left: 0,
@@ -234,28 +169,28 @@ const selectedObjectCoords = ref<SelectedObjectCoords>({
   scaleY: 1,
   angle: 0,
   opacity: 1.0,
-  controls: {},
+  controls: {} as Record<string, { x: number; y: number }>,
   originX: 'left',
   originY: 'top'
 })
 
 const isNearRotationHandle = ref(false)
-const detectedControl = ref<DetectedControl>({
+const detectedControl = ref({
   show: false,
-  handle: null,
-  corner: null,
-  edge: null,
+  handle: null as string | null,
+  corner: null as string | null,
+  edge: null as string | null,
   isRotation: false,
-  distance: null,
-  x: null,
-  y: null
+  distance: null as number | null,
+  x: null as number | null,
+  y: null as number | null
 })
 
 let isUpdatingSelectedObject = false
 let isUpdatingObjectsList = false
 
-const allObjectsList = ref<CanvasObjectItem[]>([])
-const meshesList = ref<MeshInfo[]>([])
+const allObjectsList = ref<any[]>([])
+const meshesList = ref<any[]>([])
 const activeMeshIndex = ref(-1)
 
 

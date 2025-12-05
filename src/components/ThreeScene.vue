@@ -1,4 +1,3 @@
-
 <template>
  <div class="three-scene-container">
   <pre class="text-white bg-black"> {{ orbitControlsEnabled }}</pre>
@@ -34,18 +33,15 @@
 
 <script setup lang="ts">
 
-import { ref, shallowRef, computed, onMounted, onUnmounted, watch, nextTick, markRaw, type PropType } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, watch, nextTick, markRaw, type PropType } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { setupCanvasTexture, applyTextureToMesh, useCanvasTextureStore } from '../composables/useCanvasTexture'
+import { setupCanvasTexture, applyTextureToMesh } from '../composables/useCanvasTexture'
 import { project3DClickToCanvas } from '../composables/use3DTo2DProjection'
 import { useShaderMaterial } from '../composables/useShaderMaterial'
 import TextureUpdater from './TextureUpdater.vue'
-import { get3DPositionFromUV } from '../composables/use2DTo3DProjection'
-import { TresCanvas, useTres } from '@tresjs/core'
-import { OrbitControls } from '@tresjs/cientos'
-
+import { TresCanvas } from '@tresjs/core'
 
 const props = defineProps({
   texture: {
@@ -101,13 +97,11 @@ const outerMesh = shallowRef<THREE.Mesh | null>(null)
 
 const { innerShaderMaterial, outerShaderMaterial } = useShaderMaterial()
 
-
 const orbitControlsEnabled = ref(false)
 
 let environmentMap: THREE.Texture | null = null
 let canvasTexture: THREE.CanvasTexture | null = null
 
-const canvasElement = ref<HTMLCanvasElement | null>(null)
 const tresCanvasRef = ref<any>(null)
 const textureUpdaterRef = ref<any>(null)
 
@@ -115,8 +109,6 @@ let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
 let renderer: THREE.WebGLRenderer | null = null
 let controls: ThreeOrbitControls | null = null
-let animationId: number | null = null
-let handleResize: (() => void) | null = null
 
 let shaderUniforms = {
   uDecalMap: { value: null as THREE.Texture | null },
@@ -169,9 +161,6 @@ let isUpdatingSelectedObject = false
 let isUpdatingObjectsList = false
 
 const allObjectsList = ref<any[]>([])
-const meshesList = ref<any[]>([])
-const activeMeshIndex = ref(-1)
-
 
 const loadEnvironmentMap = async (url: string | null = null) => {
   const loader = new THREE.TextureLoader()
@@ -241,8 +230,6 @@ onMounted(async () => {
   await nextTick()
 })
 
-
-
 watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
   if (newCanvas && currentMesh) {
     setupSharedCanvasTexture(newCanvas)
@@ -253,16 +240,13 @@ onUnmounted(() => {
   cleanup()
 })
 
-
 watch(() => props.texture, (newTexture) => {
   if (currentMesh && newTexture) {
     applyTexture(newTexture)
   }
 })
 
-
 const onTresReady = (state: any) => {
-
   nextTick(() => {
     if (!tresCanvasRef.value) {
       console.error('tresCanvasRef.value is null')
@@ -274,7 +258,6 @@ const onTresReady = (state: any) => {
       console.error('TresCanvas state not available')
       return
     }
-
 
     scene = (tresState.scene?.value || tresState.scene) as THREE.Scene
     camera = (tresState.camera?.value || tresState.camera) as THREE.PerspectiveCamera
@@ -316,12 +299,6 @@ const onTresReady = (state: any) => {
 const initSceneAfterTresReady = () => {
   if (!scene || !camera || !renderer) return
 
-  const canvas = renderer.domElement
-  if (canvasElement.value) {
-    canvasElement.value.width = canvas.width
-    canvasElement.value.height = canvas.height
-  }
-
   loadEnvironmentMap().then(() => {
     if (props.canvas2D) setupSharedCanvasTexture(props.canvas2D)
     loadModel("https://3d-back-wobz-v2.sh2.hidora.net/downloadSvg?filename=2025/04/24/680a5a7c34e69_2025_03_10_67cee4edc0a55_2024_02_23_65d8b8086988e_22022_05_30_6294959dca46a_12-18_(2).obj")
@@ -341,7 +318,6 @@ const initSceneAfterTresReady = () => {
   })
 }
 
-
 let raycaster3D: THREE.Raycaster | null = null
 let mouse: THREE.Vector2 | null = null
 let isDragging3D = false
@@ -356,25 +332,20 @@ let rotationCenter: { x: number; y: number } | null = null
 let rotationJustEnded = false
 let rotationEndTime = 0
 
-
-
-
 const setupClickHandler = () => {
   if (!renderer || !renderer.domElement) {
     console.error('setupClickHandler: renderer or domElement not available')
     return
   }
   
-  // Créer le raycaster pour détecter les intersections (si pas déjà créé)
   if (!raycaster3D) {
     raycaster3D = new THREE.Raycaster()
-    mouse = new THREE.Vector2()  // Coordonnées de la souris normalisées (-1 à 1)
+    mouse = new THREE.Vector2()
   }
   
   const getCanvasCoords = (event: MouseEvent) => {
     if (!props.canvas2D || !raycaster3D || !mouse || !renderer || !camera) return null
     
-    // Utiliser le canvas de TresCanvas
     const canvas = renderer.domElement
     const rect = canvas.getBoundingClientRect()
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -382,10 +353,8 @@ const setupClickHandler = () => {
     
     raycaster3D.setFromCamera(mouse, camera)
     
-    // Utiliser loadedMeshes si disponible, sinon fallback sur currentMesh
     let intersects: THREE.Intersection[] = []
     if (loadedMeshes.value.length > 0) {
-      // Tester tous les meshes dans loadedMeshes
       for (const mesh of loadedMeshes.value) {
         const meshIntersects = raycaster3D.intersectObject(mesh, true)
         if (meshIntersects.length > 0) {
@@ -402,16 +371,9 @@ const setupClickHandler = () => {
     if (intersects.length > 0) {
       const intersection = intersects[0]
       if (intersection.uv) {
-        // IMPORTANT: Toujours utiliser les dimensions LOGIQUES du canvas (props.canvas2D.width/height)
-        // et non les dimensions de la texture, car les coordonnées UV sont normalisées (0-1)
-        // et doivent être converties en pixels selon les dimensions logiques du canvas Fabric.js
-        // Les dimensions de la texture peuvent être différentes à cause du devicePixelRatio,
-        // mais cela n'affecte pas le mapping UV qui est toujours basé sur les dimensions logiques
         const canvasWidth = props.canvas2D.width || 800
         const canvasHeight = props.canvas2D.height || 600
         
-        // Utiliser les dimensions logiques du canvas pour la projection
-        // Les coordonnées UV (0-1) sont converties en pixels selon ces dimensions
         const canvasCoords = project3DClickToCanvas(
           intersection,
           canvasWidth,
@@ -429,7 +391,7 @@ const setupClickHandler = () => {
             y: intersection.point.y,
             z: intersection.point.z
           },
-          isOnSeam: intersection.uv.x < 0.01 || intersection.uv.x > 0.99 // Simple check for seam
+          isOnSeam: intersection.uv.x < 0.01 || intersection.uv.x > 0.99
         }
       }
     }
@@ -572,8 +534,6 @@ const setupClickHandler = () => {
       const intersection = intersects[0]
       const canvasWidth = props.canvas2D.width || 800
       const canvasHeight = props.canvas2D.height || 600
-      const textureWidth = canvasTexture?.image?.width || canvasWidth
-      const textureHeight = canvasTexture?.image?.height || canvasHeight
       const uvU = intersection.uv.x
       const seamThreshold = 0.01
       const isOnSeamValue = uvU < seamThreshold || uvU > (1 - seamThreshold)
@@ -816,7 +776,6 @@ const onMouseUp = (event: MouseEvent) => {
 }
 
   
-  // Handler pour la molette de la souris pour redimensionner les objets
   const onMouseWheel = (event: WheelEvent) => {
     if (!props.dragMode) return
     
@@ -824,7 +783,7 @@ const onMouseUp = (event: MouseEvent) => {
     event.stopPropagation()
     
     const delta = event.deltaY > 0 ? 1 : -1
-    const scaleFactor = 1 + (delta * 0.02) // 2% par incrément pour plus de précision
+    const scaleFactor = 1 + (delta * 0.02)
     
     emit('3d-scale', { scaleFactor })
   }
@@ -837,7 +796,6 @@ const onMouseUp = (event: MouseEvent) => {
   const canvas = renderer.domElement
   console.log('Attaching event listeners to canvas:', canvas)
   
-  // Retirer les anciens listeners s'ils existent (pour éviter les doublons)
   if (window._threeSceneDragHandlers) {
     canvas.removeEventListener('mousedown', window._threeSceneDragHandlers.onMouseDown)
     canvas.removeEventListener('mousemove', window._threeSceneDragHandlers.onMouseMove)
@@ -846,7 +804,6 @@ const onMouseUp = (event: MouseEvent) => {
     canvas.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
   }
   
-  // Ajouter les event listeners pour le drag
   canvas.addEventListener('mousedown', onMouseDown)
   canvas.addEventListener('mousemove', onMouseMove)
   canvas.addEventListener('mouseup', onMouseUp)
@@ -855,7 +812,6 @@ const onMouseUp = (event: MouseEvent) => {
   
   console.log('Event listeners attached successfully')
   
-  // Nettoyer les event listeners au démontage
   window._threeSceneDragHandlers = {
     onMouseDown,
     onMouseMove,
@@ -864,51 +820,10 @@ const onMouseUp = (event: MouseEvent) => {
     onMouseWheel
   }
   
-  // Stocker le handler pour cleanup
   window._threeSceneClickHandler = onCanvasClick
   
 }
 
-const addHelperGeometry = () => {
-  // Add a simple helper geometry to show when no model is loaded
-  const geometry = new THREE.BoxGeometry(1, 1, 1)
-  const material = new THREE.MeshStandardMaterial({ color: 0x888888, wireframe: true })
-  const helperCube = new THREE.Mesh(geometry, material)
-  helperCube.position.set(0, 0, 0)
-  
-  // Stocker le helper cube comme mesh unique dans l'array
-  // Marquer comme non-réactif pour éviter les problèmes de proxy
-  currentMesh = helperCube
-  loadedMeshes.value = [markRaw(helperCube)]
-}
-
-
-const loadUvMapsData = async (url: string): Promise<THREE.BufferAttribute | null> => {
-    try {
-        console.log('📥 Chargement de la UV Map:', url)
-        const response = await fetch(url)
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        const data = await response.json()
-        
-        // On suppose que le JSON est un tableau dont le premier élément contient les UVs
-        // Structure attendue: [ [u1, v1, u2, v2, ...] ]
-        if (Array.isArray(data) && data.length > 0) {
-            return new THREE.Float32BufferAttribute(data[0], 2)
-        } else {
-            console.warn('⚠️ Format de données UV inattendu')
-            return null
-        }
-    } catch (error) {
-        console.error('❌ Erreur chargement UV Map:', error)
-        return null
-    }
-}
-
-// ----------------------------------------
-// 🔧 Fonction utilitaire : Normalize du modèle
-// ----------------------------------------
 function normalizeModel(obj, targetSize = 8.5) {
   const box = new THREE.Box3().setFromObject(obj)
   const center = box.getCenter(new THREE.Vector3())
@@ -1014,17 +929,12 @@ const loadModel = async (url: string | File) => {
   }
 }
 
-
-/**
- * Configure la texture partagée à partir du canvas 2D HTML
- */
 const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
   if (!htmlCanvas) {
     console.warn('setupSharedCanvasTexture: htmlCanvas is null')
     return
   }
   
-  // Utiliser loadedMeshes au lieu de currentMesh si disponible
   const targetMeshes = loadedMeshes.value.length > 0 ? loadedMeshes.value : (currentMesh ? [currentMesh] : [])
   
   if (targetMeshes.length === 0) {
@@ -1033,7 +943,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
   }
 
   try {
-    // Récupérer tous les matériaux des meshes
     const materials: THREE.Material[] = []
     let meshCount = 0
     
@@ -1041,7 +950,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
       if (mesh instanceof THREE.Mesh) {
         meshCount++
         
-        // Assurer les UVs
         if (mesh.geometry && !mesh.geometry.attributes.uv) {
           generateUVs(mesh.geometry)
         }
@@ -1052,12 +960,10 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
           materials.push(mesh.material)
         }
       } else if (mesh.traverse) {
-        // Si c'est un groupe, traverser ses enfants
         mesh.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             meshCount++
             
-            // Assurer les UVs
             if (child.geometry && !child.geometry.attributes.uv) {
               generateUVs(child.geometry)
             }
@@ -1074,13 +980,11 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
     
     console.log(`setupSharedCanvasTexture: Found ${meshCount} meshes, ${materials.length} materials`)
     
-    // Si une texture existe déjà, la supprimer avant d'en créer une nouvelle
     if (canvasTexture) {
       canvasTexture.dispose()
       canvasTexture = null
     }
     
-    // Créer et configurer la texture
     canvasTexture = setupCanvasTexture(htmlCanvas, materials)
     
     if (!canvasTexture) {
@@ -1088,7 +992,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
       return
     }
     
-    // Appliquer la texture directement sur tous les meshes dans loadedMeshes
     targetMeshes.forEach((mesh) => {
       if (mesh instanceof THREE.Mesh) {
         if (Array.isArray(mesh.material)) {
@@ -1109,7 +1012,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
           mesh.material.needsUpdate = true
         }
       } else if (mesh.traverse) {
-        // Si c'est un groupe, appliquer via traverse
         applyTextureToMesh(mesh, canvasTexture)
       }
     })
@@ -1123,18 +1025,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
   }
 }
 
-/**
- * Génère des coordonnées UV pour une géométrie sans UVs
- * 
- * Les coordonnées UV sont nécessaires pour mapper une texture 2D sur une surface 3D.
- * Cette fonction choisit automatiquement la meilleure méthode de projection selon
- * la forme de l'objet :
- * - Cylindrique : pour objets verticaux (bocal, t-shirt, etc.)
- * - Plane : pour objets plats
- * - Sphérique : pour objets arrondis
- * 
- * @param {THREE.BufferGeometry} geometry - La géométrie à traiter
- */
 const generateUVs = (geometry) => {
   const positions = geometry.attributes.position
   const uvs = []
@@ -1143,7 +1033,6 @@ const generateUVs = (geometry) => {
     return
   }
   
-  // Vérifier que les positions ne contiennent pas de NaN
   let hasInvalidPositions = false
   for (let i = 0; i < positions.count; i++) {
     const x = positions.getX(i)
@@ -1159,48 +1048,35 @@ const generateUVs = (geometry) => {
     return
   }
   
-  // Calculer la bounding box pour normaliser les coordonnées
   const box = new THREE.Box3().setFromBufferAttribute(positions)
   const size = box.getSize(new THREE.Vector3())
   const center = box.getCenter(new THREE.Vector3())
   
-  // Vérifier que la taille est valide (non nulle)
   if (size.x === 0 && size.y === 0 && size.z === 0) {
-    // Utiliser une taille minimale pour éviter les divisions par zéro
     size.x = size.x || 1
     size.y = size.y || 1
     size.z = size.z || 1
   }
   
-  // Vérifier que les valeurs sont valides
   if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
       isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
     return
   }
   
-  // Déterminer la meilleure projection selon la forme de l'objet
-  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8  // Forme verticale
-  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5        // Forme plate
+  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8
+  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5
   
   if (isCylindrical) {
-    // ===== PROJECTION CYLINDRIQUE =====
-    // Pour objets verticaux (t-shirt, bocal, etc.)
-    // U = angle autour de l'axe Y (0-1)
-    // V = hauteur (0-1)
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const y = positions.getY(i) - center.y
       const z = positions.getZ(i) - center.z
       
-      // Angle autour de l'axe Y (azimuth) - inversé pour corriger l'inversion horizontale
       const angle = Math.atan2(z, x)
       let u = 1 - ((angle / (2 * Math.PI)) + 0.5)
       
-      // Hauteur normalisée selon Y - inversé pour corriger l'inversion verticale
-      // Protection contre division par zéro
       let v = size.y > 0 ? 1 - ((y + size.y / 2) / size.y) : 0.5
       
-      // Vérifier et corriger les NaN
       if (isNaN(u) || !isFinite(u)) u = 0.5
       if (isNaN(v) || !isFinite(v)) v = 0.5
       
@@ -1208,19 +1084,13 @@ const generateUVs = (geometry) => {
       uvs.push(Math.max(0, Math.min(1, v)))
     }
   } else if (isWide) {
-    // ===== PROJECTION PLANE =====
-    // Pour objets plats (plan XZ)
-    // U = position X (0-1)
-    // V = position Z (0-1)
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const z = positions.getZ(i) - center.z
       
-      // Protection contre division par zéro
       let u = size.x > 0 ? 1 - ((x + size.x / 2) / size.x) : 0.5
-      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5  // Inversé pour corriger l'inversion verticale
+      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5
       
-      // Vérifier et corriger les NaN
       if (isNaN(u) || !isFinite(u)) u = 0.5
       if (isNaN(v) || !isFinite(v)) v = 0.5
       
@@ -1228,60 +1098,45 @@ const generateUVs = (geometry) => {
       uvs.push(Math.max(0, Math.min(1, v)))
     }
   } else {
-    // ===== PROJECTION SPHÉRIQUE =====
-    // Pour objets arrondis
-    // Utilise les coordonnées sphériques pour mapper la texture
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i) - center.x
       const y = positions.getY(i) - center.y
       const z = positions.getZ(i) - center.z
       
-      // Normaliser pour obtenir un vecteur unitaire
       const length = Math.sqrt(x * x + y * y + z * z)
-      if (length > 0.0001) { // Utiliser un seuil minimal au lieu de 0
+      if (length > 0.0001) {
         const nx = x / length
         const ny = y / length
         const nz = z / length
         
-        // Coordonnées UV sphériques - inversé pour corriger l'inversion
         let u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
         let v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
         
-        // Vérifier et corriger les NaN
         if (isNaN(u) || !isFinite(u)) u = 0.5
         if (isNaN(v) || !isFinite(v)) v = 0.5
         
         uvs.push(Math.max(0, Math.min(1, u)))
         uvs.push(Math.max(0, Math.min(1, v)))
       } else {
-        // Point à l'origine : coordonnées par défaut
         uvs.push(0.5, 0.5)
       }
     }
   }
   
-  // Vérifier que tous les UVs sont valides avant de les ajouter
   let hasInvalidUVs = false
   for (let i = 0; i < uvs.length; i++) {
     if (isNaN(uvs[i]) || !isFinite(uvs[i])) {
       hasInvalidUVs = true
-      // Corriger les valeurs invalides
       uvs[i] = 0.5
     }
   }
   
-  if (hasInvalidUVs) {
-  }
-  
-  // Vérifier que le nombre d'UVs correspond au nombre de vertices
   if (uvs.length !== positions.count * 2) {
     return
   }
   
-  // Ajouter les UVs à la géométrie
   try {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    // Marquer l'attribut comme mis à jour
     geometry.attributes.uv.needsUpdate = true
   } catch (error) {
   }
@@ -1296,7 +1151,7 @@ const applyTexture = (texture: THREE.Texture | null) => {
     return
   }
 
-  texture.flipY = true  // Inverser verticalement pour correspondre à l'orientation du modèle 3D
+  texture.flipY = true
   texture.needsUpdate = true
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
@@ -1308,20 +1163,18 @@ const applyTexture = (texture: THREE.Texture | null) => {
     if (child instanceof THREE.Mesh) {
       meshCount++
       
-      // Ensure the geometry has UVs - CRITICAL!
       if (child.geometry && !child.geometry.attributes.uv) {
         generateUVs(child.geometry)
       }
       
-      // Apply texture to material
       if (Array.isArray(child.material)) {
         child.material.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
             mat.map = texture
-            mat.envMap = environmentMap // Ajouter la texture d'environnement
-            mat.transparent = true // Maintenir la transparence
-            mat.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-            mat.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
+            mat.envMap = environmentMap
+            mat.transparent = true
+            mat.opacity = 0.9
+            mat.alphaTest = 0.01
             if (mat instanceof THREE.MeshStandardMaterial) {
               mat.metalness = mat.metalness !== undefined ? mat.metalness : 0.3
               mat.roughness = mat.roughness !== undefined ? mat.roughness : 0.7
@@ -1330,11 +1183,11 @@ const applyTexture = (texture: THREE.Texture | null) => {
           } else {
             child.material[idx] = new THREE.MeshStandardMaterial({
               map: texture,
-              envMap: environmentMap, // Ajouter la texture d'environnement
+              envMap: environmentMap,
               side: THREE.DoubleSide,
-              transparent: true, // Rendre transparent
-              opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
-              alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
+              transparent: true,
+              opacity: 0.9,
+              alphaTest: 0.01,
               metalness: 0.3,
               roughness: 0.7
             })
@@ -1343,10 +1196,10 @@ const applyTexture = (texture: THREE.Texture | null) => {
       } else {
         if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
           child.material.map = texture
-          child.material.envMap = environmentMap // Ajouter la texture d'environnement
-          child.material.transparent = true // Maintenir la transparence
-          child.material.opacity = 0.9 // Opacité élevée pour que les éléments soient visibles
-          child.material.alphaTest = 0.01 // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
+          child.material.envMap = environmentMap
+          child.material.transparent = true
+          child.material.opacity = 0.9
+          child.material.alphaTest = 0.01
           if (child.material instanceof THREE.MeshStandardMaterial) {
             child.material.metalness = child.material.metalness !== undefined ? child.material.metalness : 0.3
             child.material.roughness = child.material.roughness !== undefined ? child.material.roughness : 0.7
@@ -1355,11 +1208,11 @@ const applyTexture = (texture: THREE.Texture | null) => {
         } else {
           child.material = new THREE.MeshStandardMaterial({
             map: texture,
-            envMap: environmentMap, // Ajouter la texture d'environnement
+            envMap: environmentMap,
             side: THREE.DoubleSide,
-            transparent: true, // Rendre transparent
-            opacity: 0.9, // Opacité élevée pour que les éléments soient visibles
-            alphaTest: 0.01, // Seuil alpha très bas : pixels avec alpha > 0.01 sont rendus
+            transparent: true,
+            opacity: 0.9,
+            alphaTest: 0.01,
             metalness: 0.3,
             roughness: 0.7
           })
@@ -1371,12 +1224,6 @@ const applyTexture = (texture: THREE.Texture | null) => {
 }
 
 const cleanup = () => {
-  if (animationId) {
-    cancelAnimationFrame(animationId)
-    animationId = null
-  }
-
-  // Dispose de la texture canvas
   if (canvasTexture) {
     canvasTexture.dispose()
     canvasTexture = null
@@ -1408,18 +1255,11 @@ const cleanup = () => {
     renderer = null
   }
 
-  if (handleResize) {
-    window.removeEventListener('resize', handleResize)
-    handleResize = null
-  }
-
-  // Remove click handler
   if (window._threeSceneClickHandler && renderer) {
     renderer.domElement.removeEventListener('click', window._threeSceneClickHandler)
     delete window._threeSceneClickHandler
   }
   
-  // Remove wheel handler
   if (window._threeSceneDragHandlers && window._threeSceneDragHandlers.onMouseWheel && renderer) {
     renderer.domElement.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
   }
@@ -1430,8 +1270,6 @@ const cleanup = () => {
   camera = null
 }
 
-
-// Méthode pour mettre à jour le mode placement
 const setPlacementMode = (active: boolean, type: string) => {
   if (renderer && renderer.domElement) {
     if (active) {
@@ -1442,7 +1280,6 @@ const setPlacementMode = (active: boolean, type: string) => {
   }
 }
 
-// Méthode pour mettre à jour le mode drag
 const setDragMode = (active: boolean) => {
   if (renderer && renderer.domElement) {
     if (active) {
@@ -1453,21 +1290,12 @@ const setDragMode = (active: boolean) => {
   }
 }
 
-/**
- * Configure le mode redimensionnement dans ThreeScene
- * 
- * @param {boolean} resizing - true si on est en mode redimensionnement
- * @param {Object} startPos - Position de départ {x, y}
- * @param {Object} handleInfo - Informations sur le handle
- */
 const setResizing = (resizing: boolean, startPos: { x: number; y: number } | null, handleInfo: any) => {
   isResizing3D = resizing
   if (resizing) {
     resizeStartPosition = startPos
     resizeHandleInfo = handleInfo
-    // Activer aussi isDragging3D pour que onMouseMove fonctionne
     isDragging3D = true
-    // Changer le curseur
     if (renderer && renderer.domElement) {
       renderer.domElement.style.setProperty('cursor', 'move', 'important')
     }
@@ -1477,28 +1305,16 @@ const setResizing = (resizing: boolean, startPos: { x: number; y: number } | nul
   }
 }
 
-/**
- * Configure l'état du drag dans ThreeScene
- * 
- * @param {boolean} dragging - true si on est en mode drag
- */
 const setDragState = (dragging: boolean) => {
   isDragging3D = dragging
   if (dragging) {
-    // Changer le curseur
     if (renderer && renderer.domElement) {
       renderer.domElement.style.setProperty('cursor', 'move', 'important')
     }
   }
 }
 
-/**
- * Met à jour les coordonnées de l'objet sélectionné pour l'affichage
- * 
- * @param {fabric.Object|null} obj - L'objet sélectionné ou null
- */
 const updateSelectedObjectCoords = (obj: any) => {
-  // Éviter les mises à jour récursives
   if (isUpdatingSelectedObject) {
     return
   }
@@ -1514,13 +1330,9 @@ const updateSelectedObjectCoords = (obj: any) => {
   isUpdatingSelectedObject = true
   
   try {
-    // Calculer les dimensions réelles avec le scale
     const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
     const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
     
-    // Calculer les coordonnées des contrôles
-    // Utiliser skipSetCoords = true pour éviter les boucles récursives
-    // calcCoords() recalcule les coordonnées à partir de l'état actuel sans déclencher d'événements
     const controls = calculateControlCoordinates(obj, true)
     
     selectedObjectCoords.value = {
@@ -1539,30 +1351,19 @@ const updateSelectedObjectCoords = (obj: any) => {
       originY: obj.originY || 'top'
     }
   } finally {
-    // Utiliser nextTick pour s'assurer que la mise à jour est terminée avant de réinitialiser le garde
     nextTick(() => {
       isUpdatingSelectedObject = false
     })
   }
 }
 
-
-
-/**
- * Calcule les coordonnées de tous les contrôles pour un objet Fabric.js
- * @param {fabric.Object} obj - L'objet Fabric.js
- * @param {boolean} skipSetCoords - Si true, ne pas appeler setCoords() pour éviter les boucles récursives
- * @returns {Object} - Objet contenant les coordonnées de tous les contrôles
- */
 const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<string, { x: number; y: number }> => {
   if (!obj) return {}
   
   let coords = obj.oCoords
   
-  // Si demandé, forcer le recalcul des coordonnées
   try {
     if (skipSetCoords && obj.calcCoords) {
-      // calcCoords retourne les coordonnées mises à jour sans modifier l'objet
       const calculatedCoords = obj.calcCoords()
       if (calculatedCoords) {
         coords = calculatedCoords
@@ -1570,7 +1371,6 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
     }
   } catch (e) {
     console.warn('Erreur lors de calcCoords:', e)
-    // Si calcCoords échoue, essayer oCoords
     coords = obj.oCoords || null
   }
   
@@ -1578,7 +1378,6 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
   
   const controls: Record<string, { x: number; y: number }> = {}
   
-  // Coins
   if (coords.tl) {
     controls.tl = { x: coords.tl.x, y: coords.tl.y }
   }
@@ -1592,7 +1391,6 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
     controls.br = { x: coords.br.x, y: coords.br.y }
   }
   
-  // Bords
   if (coords.tl && coords.tr) {
     controls.mt = { 
       x: (coords.tl.x + coords.tr.x) / 2, 
@@ -1618,7 +1416,6 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
     }
   }
   
-  // Contrôle de rotation (mtr)
   if (coords.tl && coords.tr) {
     const centerTopX = (coords.tl.x + coords.tr.x) / 2
     const centerTopY = (coords.tl.y + coords.tr.y) / 2
@@ -1627,14 +1424,11 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
     const length = Math.sqrt(dx * dx + dy * dy)
     
     if (Math.abs(dy) < 0.01) {
-      // Rectangle non roté
       controls.mtr = { 
         x: centerTopX, 
         y: centerTopY - 30 
       }
     } else {
-      // Rectangle roté : utiliser (dy, -dx) pour pointer vers le haut
-      // Cela garantit que mtr est toujours au-dessus du bord (côté opposé à bl)
       const offset = 30
       controls.mtr = { 
         x: centerTopX + (dy / length) * offset, 
@@ -1646,12 +1440,7 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
   return controls
 }
 
-/**
- * Met à jour la liste de tous les objets depuis le canvas Fabric.js
- * Cette fonction sera appelée depuis DesignStudio
- */
 const updateObjectsListFromCanvas = (objects: any[]) => {
-  // Éviter les mises à jour récursives
   if (isUpdatingObjectsList) {
     return
   }
@@ -1667,7 +1456,6 @@ const updateObjectsListFromCanvas = (objects: any[]) => {
   
   isUpdatingObjectsList = true
   
-  
   try {
     allObjectsList.value = objects
       .filter(obj => !obj.userData?.isWorkZoneIndicator)
@@ -1675,35 +1463,27 @@ const updateObjectsListFromCanvas = (objects: any[]) => {
         const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
         const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
         
-        // Calculer les coordonnées des contrôles (skipSetCoords = true pour éviter les boucles récursives)
         const controls = calculateControlCoordinates(obj, true)
         
-        // Calculer le centre géométrique réel de l'élément
-        // Le centre est l'intersection des diagonales, ce qui reste fixe même après rotation
         let centerX = 0
         let centerY = 0
         
         if (controls.tl && controls.tr && controls.bl && controls.br) {
-          // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
-          // Cela donne toujours le centre géométrique réel, même après rotation
-          const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
-          const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
-          const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
-          const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
+          const x1 = controls.tl.x, y1 = controls.tl.y
+          const x2 = controls.br.x, y2 = controls.br.y
+          const x3 = controls.tr.x, y3 = controls.tr.y
+          const x4 = controls.bl.x, y4 = controls.bl.y
           
-          // Formule d'intersection de deux segments de ligne
           const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
           if (Math.abs(denom) > 0.001) {
             const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
             centerX = x1 + t * (x2 - x1)
             centerY = y1 + t * (y2 - y1)
           } else {
-            // Fallback : moyenne des 4 coins si les diagonales sont parallèles
             centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
             centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
           }
         } else {
-          // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
           const originX = obj.originX || 'left'
           const originY = obj.originY || 'top'
           const objLeft = obj.left || 0
@@ -1742,74 +1522,38 @@ const updateObjectsListFromCanvas = (objects: any[]) => {
         }
       })
   } finally {
-    // Utiliser nextTick pour s'assurer que la mise à jour est terminée avant de réinitialiser le garde
     nextTick(() => {
       isUpdatingObjectsList = false
     })
   }
 }
 
-
-
-
-/**
- * Fait tourner le modèle 3D selon l'angle de rotation d'un élément 2D
- * @param {number} angleDegrees - Angle de rotation en degrés (de Fabric.js)
- */
 const rotateModel = (angleDegrees) => {
   if (!currentMesh) return
   
-  // Convertir l'angle de degrés en radians
-  // L'angle dans Fabric.js est dans le sens horaire, on le convertit pour Three.js
   const angleRadians = THREE.MathUtils.degToRad(angleDegrees)
   
   console.log('🔄 Rotation 3D - Angle:', angleDegrees, '° (', angleRadians, 'rad)')
   
-  // Méthode 1 : Utiliser setRotationFromEuler (plus propre et explicite)
-  // Créer un Euler avec rotation uniquement autour de l'axe Y
   const euler = new THREE.Euler(0, angleRadians, 0, 'XYZ')
   currentMesh.setRotationFromEuler(euler)
   
 }
 
-/**
- * Mise à jour DIRECTE de la texture (solution la plus rapide)
- * 
- * Cette méthode met à jour la texture directement sans passer par le store réactif Vue.
- * Élimine la latence de la réactivité Vue pour les événements fréquents.
- * 
- * Performance : ~0-16ms (vs ~16-33ms avec le store)
- * 
- * @param {boolean} immediate - Si true, force la mise à jour immédiatement
- */
 const updateTextureDirect = (immediate = false) => {
   if (!canvasTexture) return
   
-  // Mise à jour directe de la texture (bypass du store réactif)
   canvasTexture.needsUpdate = true
   
-  // Si immediate, on peut forcer un rendu immédiat (optionnel)
   if (immediate && renderer && scene && camera) {
     renderer.render(scene, camera)
   }
 }
 
-
-/**
- * Définit si le curseur survole le contrôle de rotation
- * @param {boolean} isHovering - true si on survole le contrôle de rotation
- */
 const setRotationHandleHover = (isHovering: boolean) => {
   coordinatesDisplay.value.isOnRotationHandle = isHovering
 }
 
-/**
- * Met à jour l'état de débogage pour afficher le contrôle détecté
- * @param {Object|null} handleInfo - Informations sur le contrôle détecté ou null
- * @param {number|null} distance - Distance au contrôle (optionnel)
- * @param {number|null} x - Coordonnée X du contrôle (optionnel)
- * @param {number|null} y - Coordonnée Y du contrôle (optionnel)
- */
 const setDetectedControl = (handleInfo: any, distance: number | null = null, x: number | null = null, y: number | null = null) => {
   if (!handleInfo) {
     detectedControl.value = {
@@ -1837,22 +1581,16 @@ const setDetectedControl = (handleInfo: any, distance: number | null = null, x: 
   }
 }
 
-/**
- * Prépare le matériau pour supporter le shader de decal
- * Cette fonction injecte le code GLSL dans le shader standard de Three.js
- */
 const patchMaterialForDecal = (material: any) => {
   if (material.userData.isPatched) return
   
   material.onBeforeCompile = (shader: THREE.Shader) => {
-    // 1. Ajouter nos uniforms
     shader.uniforms.uDecalMap = shaderUniforms.uDecalMap
     shader.uniforms.uDecalVisible = shaderUniforms.uDecalVisible
     shader.uniforms.uDecalCenter = shaderUniforms.uDecalCenter
     shader.uniforms.uDecalScale = shaderUniforms.uDecalScale
     shader.uniforms.uDecalAngle = shaderUniforms.uDecalAngle
     
-    // 2. Déclarer les uniforms et la fonction de rotation dans le Fragment Shader
     shader.fragmentShader = `
       uniform sampler2D uDecalMap;
       uniform float uDecalVisible;
@@ -1860,7 +1598,6 @@ const patchMaterialForDecal = (material: any) => {
       uniform vec2 uDecalScale;
       uniform float uDecalAngle;
       
-      // Fonction pour tourner un point autour d'un centre
       vec2 rotateUV(vec2 uv, float rotation, vec2 center) {
         float c = cos(rotation);
         float s = sin(rotation);
@@ -1869,21 +1606,14 @@ const patchMaterialForDecal = (material: any) => {
       }
     ` + shader.fragmentShader
     
-    // 3. Injecter la logique de compositing
-    // On remplace la fin du calcul de la couleur de base (map_fragment)
-    // pour ajouter notre couche par dessus
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `
       #include <map_fragment>
       
       if (uDecalVisible > 0.5) {
-        // Calculer les UVs transformés pour le decal
-        // 1. Centrer sur le point de pivot (uDecalCenter)
         vec2 centeredUv = vMapUv - uDecalCenter;
         
-        // 2. Appliquer la rotation
-        // Note: On inverse l'angle pour matcher le sens horaire
         float c = cos(-uDecalAngle);
         float s = sin(-uDecalAngle);
         vec2 rotatedUv = vec2(
@@ -1891,19 +1621,13 @@ const patchMaterialForDecal = (material: any) => {
           centeredUv.x * s + centeredUv.y * c
         );
         
-        // 3. Appliquer l'échelle (inverse car on transforme les coordonnées, pas l'image)
         vec2 finalUv = rotatedUv / uDecalScale;
         
-        // 4. Ramener dans l'espace texture (0-1)
-        // Le centre de la texture decal est (0.5, 0.5)
         finalUv += vec2(0.5, 0.5);
         
-        // Vérifier si on est dans les bornes de la texture decal
         if (finalUv.x >= 0.0 && finalUv.x <= 1.0 && finalUv.y >= 0.0 && finalUv.y <= 1.0) {
           vec4 decalColor = texture2D(uDecalMap, finalUv);
           
-          // Mélange alpha (Compositing)
-          // diffuseColor est la variable de Three.js qui contient la couleur accumulée
           diffuseColor.rgb = mix(diffuseColor.rgb, decalColor.rgb, decalColor.a);
         }
       }
@@ -1912,26 +1636,18 @@ const patchMaterialForDecal = (material: any) => {
   }
   
   material.userData.isPatched = true
-  // Forcer la recompilation
   material.needsUpdate = true
 }
 
-/**
- * Démarre la rotation optimisée via Shader
- */
 const startDecalRotation = async (objectProps: any, dataUrl: string) => {
   if (!dataUrl || !scene) return
 
   try {
-    // 1. Charger la texture
     const textureLoader = new THREE.TextureLoader()
     const texture = await textureLoader.loadAsync(dataUrl)
     
-    // 2. S'assurer que tous les matériaux sont patchés
-    // Utiliser loadedMeshes si disponible, sinon fallback sur currentMesh
     const meshesToPatch: THREE.Mesh[] = loadedMeshes.value.length > 0 ? loadedMeshes.value : (currentMesh ? [] : [])
     
-    // Si loadedMeshes est vide, utiliser currentMesh.traverse
     if (meshesToPatch.length === 0 && currentMesh) {
       currentMesh.traverse((child) => {
         if (child instanceof THREE.Mesh) {
@@ -1940,7 +1656,6 @@ const startDecalRotation = async (objectProps: any, dataUrl: string) => {
       })
     }
     
-    // Patcher tous les matériaux des meshes
     let materialsPatched = false
     meshesToPatch.forEach((mesh) => {
       if (mesh instanceof THREE.Mesh && mesh.material) {
@@ -1949,14 +1664,12 @@ const startDecalRotation = async (objectProps: any, dataUrl: string) => {
             if (mat) {
               patchMaterialForDecal(mat)
               materialsPatched = true
-              // Forcer la recompilation du shader
               mat.needsUpdate = true
             }
           })
         } else {
           patchMaterialForDecal(mesh.material)
           materialsPatched = true
-          // Forcer la recompilation du shader
           mesh.material.needsUpdate = true
         }
       }
@@ -1967,25 +1680,18 @@ const startDecalRotation = async (objectProps: any, dataUrl: string) => {
       return
     }
     
-    // 3. Calculer les coordonnées UV du centre
     const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
     const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
     
-    // ✅ IMPORTANT: left et top sont maintenant le CENTRE de l'objet
-    // (pas le coin supérieur gauche)
-    const centerX = objectProps.left  // Déjà le centre X
-    const centerY = objectProps.top   // Déjà le centre Y
+    const centerX = objectProps.left
+    const centerY = objectProps.top
     
     const centerU = centerX / canvasWidth
-    // Inversion Y standard pour les UVs
     const centerV = 1 - (centerY / canvasHeight)
     
-    // 4. Calculer l'échelle UV
-    // Quelle portion de l'espace UV (0-1) l'objet occupe-t-il ?
     const scaleU = objectProps.width / canvasWidth
     const scaleV = objectProps.height / canvasHeight
     
-    // 5. Mettre à jour les uniforms
     shaderUniforms.uDecalMap.value = texture
     shaderUniforms.uDecalCenter.value.set(centerU, centerV)
     shaderUniforms.uDecalScale.value.set(scaleU, scaleV)
@@ -1998,19 +1704,14 @@ const startDecalRotation = async (objectProps: any, dataUrl: string) => {
 }
 
 const updateDecalRotation = (absoluteAngle: number) => {
-  // Mise à jour ultra-rapide via uniform (GPU)
   shaderUniforms.uDecalAngle.value = absoluteAngle * (Math.PI / 180)
 }
 
 const endDecalRotation = () => {
-  // Cacher le decal
   shaderUniforms.uDecalVisible.value = 0
   shaderUniforms.uDecalMap.value = null
 }
 
-/**
- * Désactiver OrbitControls (empêcher la rotation du goblet)
- */
 const disableOrbitControls = () => {
   if (controls) {
     controls.enabled = false
@@ -2019,9 +1720,6 @@ const disableOrbitControls = () => {
   }
 }
 
-/**
- * Réactiver OrbitControls (permettre la rotation du goblet)
- */
 const enableOrbitControls = () => {
   if (controls) {
     controls.enabled = true
@@ -2031,42 +1729,27 @@ const enableOrbitControls = () => {
 }
 
 defineExpose({
-  // Rotation optimisée (Decal)
   startDecalRotation,
   updateDecalRotation,
   endDecalRotation,
-  
-  // Contrôles OrbitControls
   disableOrbitControls,
   enableOrbitControls,
-  
-  // Texture
   applyTexture,
   setupSharedCanvasTexture: (canvas: HTMLCanvasElement) => {
     if (canvas && currentMesh) {
       setupSharedCanvasTexture(canvas)
     }
   },
-  updateTextureDirect, // Utilisé via prop dans FabricDesigner
-  
-  // Sélection et placement
+  updateTextureDirect,
   setPlacementMode,
   updateSelectedObjectCoords,
   updateObjectsListFromCanvas,
-  
-  // Drag
   setDragMode,
   setDragState,
-  
-  // Resize
   setResizing,
-  
-  // Rotation modèle et handles
   rotateModel,
   setRotationHandleHover,
   setDetectedControl,
-  
-  // Renderer (pour accéder au DOM)
   renderer: () => renderer
 })
 </script>
@@ -2088,36 +1771,25 @@ defineExpose({
   display: none;
 }
 
-/* Bouton flottant pour ajouter un rectangle */
 .add-rectangle-btn {
   position: absolute;
   bottom: 30px;
   right: 30px;
   z-index: 999;
-  
-  /* Style du bouton */
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  
-  /* Couleurs */
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
   border-radius: 50px;
-  
-  /* Typographie */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   font-weight: 600;
-  
-  /* Effets */
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  
-  /* Empêcher la sélection du texte */
   user-select: none;
   -webkit-user-select: none;
 }
@@ -2133,7 +1805,6 @@ defineExpose({
   box-shadow: 0 2px 10px rgba(102, 126, 234, 0.4);
 }
 
-/* État actif (mode placement activé) */
 .add-rectangle-btn.active {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
@@ -2145,7 +1816,6 @@ defineExpose({
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.6);
 }
 
-/* Animation de pulsation pour l'état actif */
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
@@ -2165,7 +1835,6 @@ defineExpose({
   white-space: nowrap;
 }
 
-/* Responsive: réduire le bouton sur petits écrans */
 @media (max-width: 768px) {
   .add-rectangle-btn {
     padding: 10px 16px;
@@ -2193,15 +1862,14 @@ defineExpose({
   min-width: 250px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
-  transition: all 0.3s ease; /* Transition douce pour le changement de couleur */
+  transition: all 0.3s ease;
 }
 
-/* Style quand le curseur est sur la couture */
 .coordinates-display.on-seam {
-  background: rgba(200, 0, 0, 0.9) !important; /* Fond rouge */
-  border: 2px solid #ff0000; /* Bordure rouge */
+  background: rgba(200, 0, 0, 0.9) !important;
+  border: 2px solid #ff0000;
   color: #fff;
-  box-shadow: 0 4px 16px rgba(255, 0, 0, 0.5); /* Ombre rouge */
+  box-shadow: 0 4px 16px rgba(255, 0, 0, 0.5);
 }
 
 .coordinates-display.on-seam .coord-title {
@@ -2210,12 +1878,11 @@ defineExpose({
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
 }
 
-/* Style quand le curseur est sur le contrôle de rotation */
 .coordinates-display.on-rotation {
-  background: rgba(255, 165, 0, 0.9) !important; /* Fond orange */
-  border: 2px solid #ff8c00; /* Bordure orange foncé */
+  background: rgba(255, 165, 0, 0.9) !important;
+  border: 2px solid #ff8c00;
   color: #fff;
-  box-shadow: 0 4px 16px rgba(255, 165, 0, 0.5); /* Ombre orange */
+  box-shadow: 0 4px 16px rgba(255, 165, 0, 0.5);
 }
 
 .coordinates-display.on-rotation .coord-title {
@@ -2439,7 +2106,6 @@ defineExpose({
   font-weight: 500;
 }
 
-/* Styles pour la liste des meshes */
 .meshes-list {
   position: absolute;
   top: 20px;
@@ -2461,11 +2127,10 @@ defineExpose({
   flex-direction: column;
 }
 
-/* Styles pour la liste des objets du canvas */
 .canvas-objects-list {
   position: absolute;
   top: 20px;
-  left: 360px; /* Positionné à droite de la liste des meshes */
+  left: 360px;
   background: rgba(59, 130, 246, 0.9);
   border: 2px solid #3b82f6;
   color: #fff;
@@ -2612,7 +2277,6 @@ defineExpose({
   margin-right: 4px;
 }
 
-/* Style pour la div de débogage des contrôles */
 .debug-control {
   position: absolute;
   height: 200px;
@@ -2661,4 +2325,3 @@ defineExpose({
   color: #fff;
 }
 </style>
-

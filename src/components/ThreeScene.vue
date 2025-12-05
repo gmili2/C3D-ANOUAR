@@ -68,21 +68,9 @@ const props = defineProps({
     type: Number,
     default: 0.1
   },
-  placementMode: {
-    type: Boolean,
-    default: false
-  },
-  placementType: {
-    type: String as PropType<string | null>,
-    default: null
-  },
   dragMode: {
     type: Boolean,
     default: false
-  },
-  selectedObject: {
-    type: Object as PropType<any | null>,
-    default: null
   }
 })
 
@@ -90,7 +78,6 @@ const emit = defineEmits<{
   (e: 'texture-ready', texture: THREE.CanvasTexture): void
   (e: '3d-click', data: any): void
   (e: '3d-click-outside', data: any): void
-  (e: 'meshes-extracted', meshes: THREE.Mesh[]): void
   (e: '3d-drag', data: { canvasX: number; canvasY: number }): void
   (e: '3d-drag-start', data: { canvasX: number; canvasY: number }): void
   (e: '3d-drag-end'): void
@@ -106,23 +93,15 @@ const emit = defineEmits<{
   (e: 'detect-resize-handle', data: { canvasX: number; canvasY: number; result: { isResize: boolean; handleInfo: any } }): void
 }>()
 
-let allMeshes: THREE.Mesh[] = []
 let activeMesh: THREE.Mesh | null = null
-let highlightedMesh: THREE.Mesh | null = null
 let currentMesh: THREE.Object3D | null = null
 const loadedMeshes = shallowRef<THREE.Object3D[]>([])
-const baseMesh = shallowRef<THREE.Mesh | null>(null)
 const innerMesh = shallowRef<THREE.Mesh | null>(null)
 const outerMesh = shallowRef<THREE.Mesh | null>(null)
 
 const { innerShaderMaterial, outerShaderMaterial } = useShaderMaterial()
 
-const cameraDamping = ref(0.05)
-const cameraTarget = ref({ x: 0, y: 5, z: 0 })
-const cameraMinDistance = ref(10)
-const cameraMaxDistance = ref(40)
-const cameraMinPolarAngle = ref(1.37)
-const cameraMaxPolarAngle = ref(1.57)
+
 const orbitControlsEnabled = ref(false)
 
 let environmentMap: THREE.Texture | null = null
@@ -258,29 +237,14 @@ const loadEnvironmentMap = async (url: string | null = null) => {
   }
 }
 
-
 onMounted(async () => {
   await nextTick()
 })
 
-// Watch pour mettre à jour les coordonnées de l'objet sélectionné
-watch(() => props.selectedObject, (newObject) => {
-  updateSelectedObjectCoords(newObject)
-}, { deep: true })
 
-// Watch pour le canvas 2D - Reconfigurer la texture quand le canvas change
+
 watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
   if (newCanvas && currentMesh) {
-    // Vérifier si les dimensions ont changé
-    const oldWidth = oldCanvas?.width || 0
-    const oldHeight = oldCanvas?.height || 0
-    const newWidth = newCanvas.width || 0
-    const newHeight = newCanvas.height || 0
-    
-    if (oldWidth !== newWidth || oldHeight !== newHeight) {
-      // Dimensions changed
-    }
-    
     setupSharedCanvasTexture(newCanvas)
   }
 }, { deep: true })
@@ -288,7 +252,6 @@ watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
 onUnmounted(() => {
   cleanup()
 })
-
 
 
 watch(() => props.texture, (newTexture) => {
@@ -389,7 +352,6 @@ let resizeHandleInfo: any = null
 let isRotating3D = false
 let rotationStartPosition: { x: number; y: number } | null = null
 let rotationStartCursor: { x: number; y: number } | null = null
-let rotationStartAngle: number | null = null
 let rotationCenter: { x: number; y: number } | null = null
 let rotationJustEnded = false
 let rotationEndTime = 0
@@ -678,7 +640,6 @@ const setupClickHandler = () => {
   }
 }
 
-
   
 const onMouseUp = (event: MouseEvent) => {
   if (isRotating3D) {
@@ -729,235 +690,145 @@ const onMouseUp = (event: MouseEvent) => {
   }
 }
 
-  
-  const onCanvasClick = (event: MouseEvent) => {
-    // Si on est en train de glisser activement, ne pas gérer les clics simples
-    // (pour éviter de sélectionner pendant un drag)
-    if (isDragging3D || isResizing3D || isRotating3D) return
-    
-    if (!props.canvas2D || !raycaster3D || !renderer) return
-    
-    const canvas = renderer.domElement
-    const rect = canvas.getBoundingClientRect()
-    if (!mouse) return
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-    
-    if (!camera) return
-    raycaster3D.setFromCamera(mouse, camera)
-    
-    // Utiliser loadedMeshes si disponible, sinon fallback sur currentMesh
-    let intersects: THREE.Intersection[] = []
-    let targetObject: THREE.Object3D | null = null
-    
-    if (loadedMeshes.value.length > 0) {
-      // Tester tous les meshes dans loadedMeshes
-      for (const mesh of loadedMeshes.value) {
-        const meshIntersects = raycaster3D.intersectObject(mesh, true)
-        if (meshIntersects.length > 0) {
-          intersects = meshIntersects
-          targetObject = mesh
+ const onCanvasClick = (event: MouseEvent) => {
+  if (isDragging3D || isResizing3D || isRotating3D) return
+  if (!props.canvas2D || !raycaster3D || !renderer || !mouse || !camera) return
+
+  const rect = renderer.domElement.getBoundingClientRect()
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+  raycaster3D.setFromCamera(mouse, camera)
+
+  const meshesToCheck =
+    loadedMeshes.value.length > 0
+      ? loadedMeshes.value
+      : [activeMesh, currentMesh].filter(Boolean)
+
+  let intersects: THREE.Intersection[] = []
+  let targetMesh: THREE.Object3D | null = null
+
+  for (const mesh of meshesToCheck) {
+    const result = raycaster3D.intersectObject(mesh!, true)
+    if (result.length > 0) {
+      intersects = result
+      targetMesh = mesh!
+      break
+    }
+  }
+
+  if (intersects.length === 0) {
+    emit('3d-click-outside', {})
+    return
+  }
+
+  const intersection = intersects[0]
+  let clickedMesh: THREE.Object3D | null = intersection.object
+
+  while (clickedMesh && !(clickedMesh instanceof THREE.Mesh)) {
+    clickedMesh = clickedMesh.parent
+  }
+
+  const canvasWidth = props.canvas2D.width
+  const canvasHeight = props.canvas2D.height
+
+  if (intersection.uv) {
+    const canvasCoords = project3DClickToCanvas(
+      intersection,
+      canvasWidth,
+      canvasHeight,
+      props.workZoneTop,
+      props.workZoneBottom
+    )
+
+    if (!canvasCoords) return
+
+    const controls = selectedObjectCoords.value.controls
+    const mtr = controls?.mtr
+    let isRotationClick = false
+
+    if (selectedObjectCoords.value.show && mtr) {
+      const dx = canvasCoords.x - mtr.x
+      const dy = canvasCoords.y - mtr.y
+      if (Math.hypot(dx, dy) <= 10) {
+        isRotationClick = true
+        emit('3d-rotation-click', {
+          intersection,
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y,
+          uv: intersection.uv,
+          mesh: clickedMesh,
+          mtrCoords: mtr
+        })
+      }
+    }
+
+    if (!isRotationClick) {
+      emit('3d-click', {
+        intersection,
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y,
+        uv: intersection.uv,
+        mesh: clickedMesh,
+        checkForObject: true
+      })
+    }
+
+    return
+  }
+
+  if (clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
+    if (currentMesh) {
+      currentMesh.traverse(mesh => {
+        if (mesh instanceof THREE.Mesh && mesh.geometry && !mesh.geometry.attributes.uv) {
+          generateUVs(mesh.geometry)
+        }
+      })
+    }
+
+    setTimeout(() => {
+      clickedMesh!.geometry.attributes.uv.needsUpdate = true
+
+      const retryList = targetMesh ? [targetMesh] : meshesToCheck
+      for (const mesh of retryList) {
+        const newHit = raycaster3D!.intersectObject(mesh!, true)
+        if (newHit.length > 0 && newHit[0].uv) {
+          const coords = project3DClickToCanvas(
+            newHit[0],
+            canvasWidth,
+            canvasHeight,
+            props.workZoneTop,
+            props.workZoneBottom
+          )
+          if (coords) {
+            emit('3d-click', {
+              intersection: newHit[0],
+              canvasX: coords.x,
+              canvasY: coords.y,
+              uv: newHit[0].uv,
+              mesh: clickedMesh
+            })
+          }
           break
         }
       }
-    } else if (activeMesh) {
-      targetObject = activeMesh
-      intersects = raycaster3D.intersectObject(activeMesh, true)
-    } else if (currentMesh) {
-      targetObject = currentMesh
-      intersects = raycaster3D.intersectObject(currentMesh, true)
-    }
-    
-    if (intersects.length > 0) {
-      const intersection = intersects[0]
-      
-      // Identifier quel mesh a été cliqué
-      let clickedMesh: THREE.Object3D | null = intersection.object
-      while (clickedMesh && !(clickedMesh instanceof THREE.Mesh)) {
-        clickedMesh = clickedMesh.parent
-      }
-      
-      
-      // Vérifier si l'intersection a des UVs
-      if (intersection.uv) {
-        // Convertir le clic 3D en coordonnées canvas 2D avec zone de travail
-        // IMPORTANT: Toujours utiliser les dimensions LOGIQUES du canvas
-        // Les coordonnées UV sont normalisées (0-1) et doivent être converties
-        // selon les dimensions logiques du canvas Fabric.js, pas les dimensions de la texture
-        const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
-        const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
-        
-        const canvasCoords = project3DClickToCanvas(
-          intersection,
-          canvasWidth,
-          canvasHeight,
-          props.workZoneTop,
-          props.workZoneBottom
-        )
-        
-        if (canvasCoords) {
-          const activeZoneTop = props.workZoneTop
-          const activeZoneBottom = 1 - props.workZoneBottom
-          const activeZoneHeight = activeZoneBottom - activeZoneTop
-          const normalizedV = (intersection.uv.y - activeZoneTop) / activeZoneHeight
-          
-        }
-        
-        if (canvasCoords !== null) {
-          // Vérifier si on clique sur le contrôle de rotation (mtr) de l'élément sélectionné
-          let isRotationClick = false
-          if (selectedObjectCoords.value.show && selectedObjectCoords.value.controls && selectedObjectCoords.value.controls.mtr) {
-            const mtrX = selectedObjectCoords.value.controls.mtr.x
-            const mtrY = selectedObjectCoords.value.controls.mtr.y
-            const cursorX = canvasCoords.x
-            const cursorY = canvasCoords.y
-            
-            // Calculer la distance entre le clic et le mtr
-            const distance = Math.sqrt(Math.pow(cursorX - mtrX, 2) + Math.pow(cursorY - mtrY, 2))
-            
-            // Seuil de proximité pour considérer qu'on clique sur le mtr (en pixels)
-            const clickThreshold = 10
-            
-            if (distance <= clickThreshold) {
-              isRotationClick = true
-              // Émettre un événement spécial pour activer la rotation
-              console.log('3d-rotation-click');
-              emit('3d-rotation-click', {
-                intersection,
-                canvasX: canvasCoords.x,
-                canvasY: canvasCoords.y,
-                uv: intersection.uv,
-                mesh: clickedMesh,
-                mtrCoords: selectedObjectCoords.value.controls.mtr
-              })
-            }
-          }
-          
-          // Si on est en mode placement, émettre l'événement pour placer l'élément
-          if (!isRotationClick && props.placementMode && props.placementType) {
-            emit('3d-click', {
-              intersection,
-              canvasX: canvasCoords.x,
-              canvasY: canvasCoords.y,
-              uv: intersection.uv,
-              mesh: clickedMesh,
-              placementType: props.placementType
-            })
-          } else if (!isRotationClick) {
-            // ========================================================================
-            // VÉRIFICATION: EST-CE QU'ON CLIQUE SUR UN OBJET EXISTANT ?
-            // ========================================================================
-            // On émet l'événement '3d-click' avec les coordonnées du clic
-            // Le composant parent (DesignStudio) va vérifier s'il y a un objet à cette position
-            // Si aucun objet n'est trouvé, il désélectionnera tous les objets
-            emit('3d-click', {
-              intersection,
-              canvasX: canvasCoords.x,
-              canvasY: canvasCoords.y,
-              uv: intersection.uv,
-              mesh: clickedMesh,
-              checkForObject: true  // Flag pour indiquer qu'on doit vérifier s'il y a un objet
-            })
-          }
-          
-        } else {
-        }
-      } else {
-        // Essayer de générer les UVs si possible
-        if (clickedMesh && clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
-          // Générer les UVs pour tous les meshes du modèle si nécessaire
-          if (currentMesh) {
-            currentMesh.traverse((mesh) => {
-              if (mesh instanceof THREE.Mesh && mesh.geometry && !mesh.geometry.attributes.uv) {
-                generateUVs(mesh.geometry)
-              }
-            })
-          }
-          
-          // Réessayer après génération avec un délai plus long pour la mise à jour
-          setTimeout(() => {
-            // Forcer la mise à jour de la géométrie
-            if (clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
-              clickedMesh.geometry.attributes.uv.needsUpdate = true
-            }
-            
-            // Re-tester avec le même targetObject ou loadedMeshes
-            let newIntersects: THREE.Intersection[] = []
-            if (targetObject) {
-              newIntersects = raycaster3D!.intersectObject(targetObject, true)
-            } else if (loadedMeshes.value.length > 0) {
-              for (const mesh of loadedMeshes.value) {
-                const meshIntersects = raycaster3D!.intersectObject(mesh, true)
-                if (meshIntersects.length > 0) {
-                  newIntersects = meshIntersects
-                  break
-                }
-              }
-            }
-            if (newIntersects.length > 0 && newIntersects[0].uv) {
-              // IMPORTANT: Toujours utiliser les dimensions RÉELLES du canvas HTML
-              const canvasWidth = props.canvas2D ? props.canvas2D.width : 800
-              const canvasHeight = props.canvas2D ? props.canvas2D.height : 600
-              
-              const newCanvasCoords = project3DClickToCanvas(
-                newIntersects[0],
-                canvasWidth,
-                canvasHeight,
-                props.workZoneTop,
-                props.workZoneBottom
-              )
-              if (newCanvasCoords !== null) {
-                if (props.placementMode && props.placementType) {
-                  emit('3d-click', {
-                    intersection: newIntersects[0],
-                    canvasX: newCanvasCoords.x,
-                    canvasY: newCanvasCoords.y,
-                    uv: newIntersects[0].uv,
-                    mesh: clickedMesh,
-                    placementType: props.placementType
-                  })
-                } else {
-                  emit('3d-click', {
-                    intersection: newIntersects[0],
-                    canvasX: newCanvasCoords.x,
-                    canvasY: newCanvasCoords.y,
-                    uv: newIntersects[0].uv,
-                    mesh: clickedMesh
-                  })
-                }
-              }
-            } else {
-            }
-          }, 200)
-        }
-      }
-    } else {
-      // Clic en dehors du modèle 3D - désélectionner l'objet
-      emit('3d-click-outside', {})
-    }
+    }, 200)
   }
+}
+
   
   // Handler pour la molette de la souris pour redimensionner les objets
   const onMouseWheel = (event: WheelEvent) => {
-    // Seulement si un objet est sélectionné (en mode drag ou non)
-    // On vérifie si dragMode est actif, ce qui signifie qu'un objet est sélectionné
     if (!props.dragMode) return
     
-    // Empêcher le zoom par défaut de Three.js et OrbitControls
     event.preventDefault()
     event.stopPropagation()
     
-    // Calculer le facteur de scale basé sur la direction de la molette
-    // DeltaY positif = scroll down = réduire, négatif = scroll up = agrandir
-    // Utiliser un facteur plus fin pour un contrôle plus précis
     const delta = event.deltaY > 0 ? 1 : -1
     const scaleFactor = 1 + (delta * 0.02) // 2% par incrément pour plus de précision
     
-    // Émettre l'événement de redimensionnement
     emit('3d-scale', { scaleFactor })
   }
   
-  // Vérifier que renderer.domElement existe avant d'ajouter les listeners
   if (!renderer || !renderer.domElement) {
     console.error('setupClickHandler: renderer.domElement not available')
     return
@@ -1130,7 +1001,6 @@ const loadModel = async (url: string | File) => {
     }
 
     obj.rotation.y = Math.PI
-    emit("model-loaded", obj)
     await nextTick()
 
     if (props.canvas2D) {
@@ -1144,225 +1014,6 @@ const loadModel = async (url: string | File) => {
   }
 }
 
-
-
-/**
- * Charge une base (cercle avec texture) pour le gobelet
- */
-const loadBase = async () => {
-  try {
-    console.log('🔄 Début du chargement de la base...')
-    
-    const textureLoader = new THREE.TextureLoader()
-    
-    // URL de la texture de base
-    const baseTextureUrl = 'https://tossware-back-dev.us1.paas.virtuozzo.cloud/downloadSvg?filename=2024/12/26/676d5e25f1c63_CuteCat.jpg'
-    
-    console.log('📥 Chargement de la texture:', baseTextureUrl)
-    const map = await textureLoader.loadAsync(baseTextureUrl)
-    map.colorSpace = 'srgb'
-    map.flipY = false // Important pour que la texture soit dans le bon sens
-    
-    // Positionner la base sous le gobelet
-    // Calculer la bounding box du modèle pour positionner la base correctement
-    let baseRadius = 1 // Rayon par défaut
-    let basePosition = { x: 0, y: -1, z: 0 }
-    
-    if (currentMesh) {
-      const box = new THREE.Box3().setFromObject(currentMesh)
-      const size = box.getSize(new THREE.Vector3())
-      const center = box.getCenter(new THREE.Vector3())
-      
-      console.log('📐 Dimensions du modèle:', { size, center, scale: currentMesh.scale })
-      
-      // Ajuster la taille de la base selon la taille du modèle
-      // La bounding box reflète déjà la taille après scaling, donc on utilise directement size
-      baseRadius = Math.max(size.x, size.z) / 2 + 0.3 // Légèrement plus grand que le modèle
-      
-      console.log('📏 Taille calculée de la base:', { sizeX: size.x, sizeZ: size.z, baseRadius })
-      
-      // Positionner la base en bas du modèle
-      basePosition = {
-        x: center.x,
-        y: center.y - size.y / 2 - 0.1, // Juste sous le modèle
-        z: center.z
-      }
-      
-      console.log('📍 Position de la base:', basePosition, 'Rayon:', baseRadius)
-    }
-    
-    // Créer la géométrie avec le bon rayon
-    const geometry = new THREE.CircleGeometry(baseRadius, 128)
-    
-    // Utiliser MeshStandardMaterial au lieu de MeshBasicMaterial pour être visible avec les lumières
-    const material = new THREE.MeshStandardMaterial({
-      color: '#FFFFFF',
-      side: THREE.DoubleSide,
-      map: map,
-      transparent: false, // Base opaque
-      roughness: 0.5,
-      metalness: 0.1
-    })
-    
-    const baseCircleMesh = new THREE.Mesh(geometry, material)
-    
-    // Nommer le mesh pour le débogage
-    baseCircleMesh.name = 'Base'
-    
-    // Forcer l'initialisation de layers (requis pour Three.js)
-    baseCircleMesh.layers = new THREE.Layers()
-    
-    // Stocker le mesh de la base dans la variable réactive
-    // On utilise markRaw pour éviter que Vue ne rende l'objet Three.js réactif
-    baseMesh.value = markRaw(baseCircleMesh)
-    
-    // Vérifier que la base est bien créée
-    console.log('✅ Base chargée avec succès:', {
-      position: baseCircleMesh.position,
-      rotation: baseCircleMesh.rotation,
-      radius: baseRadius,
-      baseMeshVisible: baseCircleMesh.visible,
-      baseMeshLayers: baseCircleMesh.layers.mask
-    })
-    
-    // S'assurer que la base est visible
-    baseCircleMesh.visible = true
-    
-    // Forcer un rendu pour voir la base immédiatement
-    if (renderer && scene && camera) {
-      renderer.render(scene, camera)
-    }
-  } catch (error) {
-    console.error('❌ Erreur lors du chargement de la base:', error)
-  }
-}
-
-/**
- * Applique un matériau défini par un objet JSON au modèle 3D
- * @param {Object} materialConfig - Configuration du matériau (JSON)
- */
-const applyMaterial = async (materialConfig: any) => {
-  if (!materialConfig || !materialConfig.materialJson) {
-    console.warn('⚠️ Configuration de matériau invalide')
-    return
-  }
-
-  console.log('🎨 Application du matériau:', materialConfig.name)
-
-  try {
-    // 1. Charger l'environnement map si présent
-    let envMap: THREE.Texture | null = null
-    if (materialConfig.envMapPath) {
-      const textureLoader = new THREE.TextureLoader()
-      // Construire l'URL complète si nécessaire (à adapter selon votre structure)
-      // Ici on suppose que envMapPath est relatif à une URL de base ou absolu
-      const envMapUrl = materialConfig.envMapPath.startsWith('http') 
-        ? materialConfig.envMapPath 
-        : `https://tossware-back-dev.us1.paas.virtuozzo.cloud/downloadSvg?filename=${materialConfig.envMapPath}`
-      
-      console.log('📥 Chargement de l\'envMap:', envMapUrl)
-      try {
-        envMap = await textureLoader.loadAsync(envMapUrl)
-        envMap.mapping = THREE.EquirectangularReflectionMapping
-      } catch (e) {
-        console.error('❌ Erreur chargement envMap:', e)
-      }
-    }
-
-    // 2. Créer le matériau depuis le JSON
-    const materialLoader = new THREE.MaterialLoader()
-    const material = materialLoader.parse(materialConfig.materialJson)
-    
-    // Appliquer l'envMap si chargé
-    if (envMap) {
-      material.envMap = envMap
-      material.needsUpdate = true
-    }
-
-    // 3. Appliquer le matériau aux meshes
-    // Si on a une architecture Inner/Outer, on applique le matériau sur l'Inner (le verre)
-    // et on ne touche pas à l'Outer (qui porte la texture)
-    let targetMeshes: THREE.Object3D[] = []
-    
-    if (innerMesh.value) {
-        console.log('🎯 Application sur innerMesh (Verre)')
-        targetMeshes = [innerMesh.value]
-    } else if (loadedMeshes.value.length > 0) {
-        targetMeshes = loadedMeshes.value
-    } else if (currentMesh) {
-        targetMeshes = [currentMesh]
-    }
-    
-    if (targetMeshes.length === 0) {
-      console.warn('⚠️ Aucun mesh trouvé pour appliquer le matériau')
-      return
-    }
-
-    const applyToMesh = (obj: THREE.Object3D) => {
-      // Ne pas appliquer sur la base ou l'outer mesh (texture)
-      if (obj.name === 'Base' || obj.name === 'Outer_Texture') return
-
-      if (obj instanceof THREE.Mesh) {
-        // CLONER le matériau pour chaque mesh pour éviter les effets de bord
-        const newMaterial = material.clone()
-        
-        // Forcer le rendu double face pour le verre
-        newMaterial.side = THREE.DoubleSide
-        
-        // Si on applique sur un mesh standard (pas inner/outer séparé), 
-        // on essaie de préserver la map existante
-        if (!innerMesh.value && obj.material) {
-           const oldMaterial = Array.isArray(obj.material) ? obj.material[0] : obj.material
-           if (oldMaterial.map && !newMaterial.map) {
-             newMaterial.map = oldMaterial.map
-             
-             // Améliorer la netteté de la texture
-             if (newMaterial.map) {
-               newMaterial.map.anisotropy = renderer?.capabilities.getMaxAnisotropy() || 1
-               newMaterial.map.needsUpdate = true
-             }
-           }
-        }
-        
-        // Si c'est du verre (transmission > 0), s'assurer que les paramètres sont optimaux
-        // @ts-ignore - transmission might not be in the type definition but exists on MeshPhysicalMaterial
-        if (newMaterial.transmission && newMaterial.transmission > 0) {
-          newMaterial.transparent = true
-        }
-
-        obj.material = newMaterial
-        if (Array.isArray(obj.material)) {
-            obj.material.forEach(m => m.needsUpdate = true)
-        } else {
-            obj.material.needsUpdate = true
-        }
-      }
-      
-      if (obj.children && obj.children.length > 0) {
-        obj.children.forEach(applyToMesh)
-      }
-    }
-
-    targetMeshes.forEach(mesh => {
-      // Si c'est un groupe ou un objet complexe, traverser
-      if (mesh.traverse) {
-        mesh.traverse(applyToMesh)
-      } else {
-        applyToMesh(mesh)
-      }
-    })
-
-    console.log('✅ Matériau appliqué avec succès')
-    
-    // Forcer un rendu
-    if (renderer && scene && camera) {
-      renderer.render(scene, camera)
-    }
-
-  } catch (error) {
-    console.error('❌ Erreur lors de l\'application du matériau:', error)
-  }
-}
 
 /**
  * Configure la texture partagée à partir du canvas 2D HTML
@@ -1469,121 +1120,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
     
   } catch (error) {
     console.error('setupSharedCanvasTexture error:', error)
-  }
-}
-
-// ============================================================================
-// SECTION 5 : GÉNÉRATION D'UVs (Mapping Texture)
-// ============================================================================
-
-/**
- * Génère des coordonnées UV sans couture pour une géométrie
- * Les UVs sont étalés de 0.05 à 0.95 pour éviter la discontinuité à U=0/U=1
- * 
- * @param {THREE.BufferGeometry} geometry - La géométrie à traiter
- * @param {boolean} seamless - Si true, étale les UVs pour éviter la couture
- */
-const generateSeamlessUVs = (geometry, seamless = false) => {
-  const positions = geometry.attributes.position
-  const uvs = []
-  
-  if (!positions || positions.count === 0) {
-    return
-  }
-  
-  // Calculer la bounding box
-  const box = new THREE.Box3().setFromBufferAttribute(positions)
-  const size = box.getSize(new THREE.Vector3())
-  const center = box.getCenter(new THREE.Vector3())
-  
-  // Déterminer la meilleure projection
-  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8
-  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5
-  
-  // Facteur d'étalement pour éviter la couture (0.05 à 0.95 au lieu de 0 à 1)
-  const uMin = seamless ? 0.05 : 0
-  const uMax = seamless ? 0.95 : 1
-  const uRange = uMax - uMin
-  
-  if (isCylindrical) {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const y = positions.getY(i) - center.y
-      const z = positions.getZ(i) - center.z
-      
-      const angle = Math.atan2(z, x)
-      let u = 1 - ((angle / (2 * Math.PI)) + 0.5)
-      
-      // Étaler les UVs pour éviter la couture
-      if (seamless) {
-        u = uMin + (u * uRange)
-      }
-      
-      let v = size.y > 0 ? 1 - ((y + size.y / 2) / size.y) : 0.5
-      
-      if (isNaN(u) || !isFinite(u)) u = 0.5
-      if (isNaN(v) || !isFinite(v)) v = 0.5
-      
-      uvs.push(Math.max(0, Math.min(1, u)))
-      uvs.push(Math.max(0, Math.min(1, v)))
-    }
-  } else if (isWide) {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const z = positions.getZ(i) - center.z
-      
-      let u = size.x > 0 ? 1 - ((x + size.x / 2) / size.x) : 0.5
-      
-      // Étaler les UVs pour éviter la couture
-      if (seamless) {
-        u = uMin + (u * uRange)
-      }
-      
-      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5
-      
-      if (isNaN(u) || !isFinite(u)) u = 0.5
-      if (isNaN(v) || !isFinite(v)) v = 0.5
-      
-      uvs.push(Math.max(0, Math.min(1, u)))
-      uvs.push(Math.max(0, Math.min(1, v)))
-    }
-  } else {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const y = positions.getY(i) - center.y
-      const z = positions.getZ(i) - center.z
-      
-      const length = Math.sqrt(x * x + y * y + z * z)
-      if (length > 0.0001) {
-        const nx = x / length
-        const ny = y / length
-        const nz = z / length
-        
-        let u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
-        
-        // Étaler les UVs pour éviter la couture
-        if (seamless) {
-          u = uMin + (u * uRange)
-        }
-        
-        let v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
-        
-        if (isNaN(u) || !isFinite(u)) u = 0.5
-        if (isNaN(v) || !isFinite(v)) v = 0.5
-        
-        uvs.push(Math.max(0, Math.min(1, u)))
-        uvs.push(Math.max(0, Math.min(1, v)))
-      } else {
-        uvs.push(0.5, 0.5)
-      }
-    }
-  }
-  
-  // Ajouter les UVs à la géométrie
-  try {
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    geometry.attributes.uv.needsUpdate = true
-  } catch (error) {
   }
 }
 
@@ -1894,72 +1430,6 @@ const cleanup = () => {
   camera = null
 }
 
-// ============================================================================
-// SECTION 8 : GESTION DES MESHES (Highlight, Active, etc.)
-// ============================================================================
-
-/**
- * Met en évidence un mesh (change sa couleur)
- * 
- * @param {THREE.Mesh} mesh - Le mesh à mettre en évidence
- * @param {boolean} isHighlighting - true pour mettre en évidence, false pour réinitialiser
- */
-const highlightMesh = (mesh: THREE.Mesh | null, isHighlighting = true) => {
-  if (!mesh) return
-  
-  // Réinitialiser la précédente mise en évidence
-  if (highlightedMesh && highlightedMesh !== mesh) {
-    resetMeshHighlight(highlightedMesh)
-  }
-  
-  if (isHighlighting) {
-    // Sauvegarder le matériau original
-    if (!mesh.userData.originalMaterial) {
-      mesh.userData.originalMaterial = Array.isArray(mesh.material) ? mesh.material.map(m => m.clone()) : mesh.material.clone()
-    }
-    
-    // Appliquer un matériau de highlight
-    const highlightMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffff00,
-      emissive: 0x444400,
-      side: THREE.DoubleSide,
-      wireframe: false
-    })
-    
-    mesh.material = highlightMaterial
-    highlightedMesh = mesh
-  } else {
-    resetMeshHighlight(mesh)
-    highlightedMesh = null
-  }
-}
-
-const resetMeshHighlight = (mesh: THREE.Mesh) => {
-  if (mesh.userData.originalMaterial) {
-    mesh.material = mesh.userData.originalMaterial
-    delete mesh.userData.originalMaterial
-  }
-}
-
-const highlightAllMeshes = () => {
-  allMeshes.forEach(mesh => {
-    resetMeshHighlight(mesh)
-  })
-  highlightedMesh = null
-}
-
-const setActiveMesh = (mesh: THREE.Mesh | null) => {
-  activeMesh = mesh
-  // Lorsqu'un mesh est actif, on peut limiter les clics à ce mesh seulement
-  // Mettre à jour l'index actif dans la liste
-  if (mesh) {
-    const meshIndex = meshesList.value.findIndex(m => m.mesh === mesh)
-    activeMeshIndex.value = meshIndex >= 0 ? meshIndex : -1
-  } else {
-    activeMeshIndex.value = -1
-  }
-}
-
 
 // Méthode pour mettre à jour le mode placement
 const setPlacementMode = (active: boolean, type: string) => {
@@ -2076,21 +1546,7 @@ const updateSelectedObjectCoords = (obj: any) => {
   }
 }
 
-/**
- * Met à jour la liste de tous les objets du canvas
- */
-const updateAllObjectsList = () => {
-  if (!props.canvas2D) {
-    allObjectsList.value = []
-    return
-  }
-  
-  // Récupérer le canvas Fabric.js depuis le canvas HTML
-  // On doit accéder au canvas via DesignStudio
-  // Pour l'instant, on va utiliser une approche différente
-  // On va écouter les événements depuis DesignStudio
-  allObjectsList.value = []
-}
+
 
 /**
  * Calcule les coordonnées de tous les contrôles pour un objet Fabric.js
@@ -2211,21 +1667,13 @@ const updateObjectsListFromCanvas = (objects: any[]) => {
   
   isUpdatingObjectsList = true
   
+  
   try {
-    // Identifier l'objet sélectionné pour le marquer
-    const selectedObj = props.selectedObject
-    
     allObjectsList.value = objects
       .filter(obj => !obj.userData?.isWorkZoneIndicator)
       .map((obj, index) => {
         const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
         const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-        
-        // Vérifier si cet objet est sélectionné
-        const isSelected = selectedObj && (
-          (obj.id && selectedObj.id && obj.id === selectedObj.id) ||
-          obj === selectedObj
-        )
         
         // Calculer les coordonnées des contrôles (skipSetCoords = true pour éviter les boucles récursives)
         const controls = calculateControlCoordinates(obj, true)
@@ -2288,7 +1736,6 @@ const updateObjectsListFromCanvas = (objects: any[]) => {
           width: objWidth,
           height: objHeight,
           opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
-          isSelected: isSelected,
           controls: controls,
           centerX: centerX,
           centerY: centerY
@@ -2323,18 +1770,6 @@ const rotateModel = (angleDegrees) => {
   const euler = new THREE.Euler(0, angleRadians, 0, 'XYZ')
   currentMesh.setRotationFromEuler(euler)
   
-  // Alternative : Méthode 2 - Utiliser rotateOnAxis (rotation additive)
-  // const axis = new THREE.Vector3(0, 1, 0) // Axe Y (vertical)
-  // currentMesh.rotateOnAxis(axis, angleRadians)
-  
-  // Alternative : Méthode 3 - Utiliser rotation.y directement (méthode actuelle)
-  // currentMesh.rotation.y = angleRadians
-  
-  // Mettre à jour les contrôles pour que la caméra suive la rotation
-  if (controls) {
-    // Optionnel : faire tourner aussi la caméra pour suivre le modèle
-    // controls.update()
-  }
 }
 
 /**
@@ -2359,21 +1794,6 @@ const updateTextureDirect = (immediate = false) => {
   }
 }
 
-/**
- * Réduit la taille du modèle 3D actuellement chargé
- * @param {number} scaleFactor - Facteur de réduction (ex: 0.8 pour réduire de 20%)
- */
-const scaleModel = (scaleFactor = 0.8) => {
-  if (!currentMesh) return
-  
-  // Appliquer le scale au modèle
-  currentMesh.scale.multiplyScalar(scaleFactor)
-  
-  // Mettre à jour les contrôles de la caméra si nécessaire
-  if (controls) {
-    controls.update()
-  }
-}
 
 /**
  * Définit si le curseur survole le contrôle de rotation

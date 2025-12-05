@@ -56,14 +56,6 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
-  workZoneTop: {
-    type: Number,
-    default: 0.1
-  },
-  workZoneBottom: {
-    type: Number,
-    default: 0.1
-  },
   dragMode: {
     type: Boolean,
     default: false
@@ -99,7 +91,7 @@ const { innerShaderMaterial, outerShaderMaterial } = useShaderMaterial()
 
 const orbitControlsEnabled = ref(false)
 
-let environmentMap: THREE.Texture | null = null
+
 let canvasTexture: THREE.CanvasTexture | null = null
 
 const tresCanvasRef = ref<any>(null)
@@ -162,69 +154,7 @@ let isUpdatingObjectsList = false
 
 const allObjectsList = ref<any[]>([])
 
-const loadEnvironmentMap = async (url: string | null = null) => {
-  const loader = new THREE.TextureLoader()
 
-  try {
-    if (url) {
-      environmentMap = await new Promise<THREE.Texture>((resolve, reject) => {
-        loader.load(
-          url,
-          (texture) => {
-            texture.mapping = THREE.EquirectangularReflectionMapping
-            texture.needsUpdate = true
-            resolve(texture)
-          },
-          undefined,
-          reject
-        )
-      })
-    } else {
-      const envCanvas = document.createElement('canvas')
-      envCanvas.width = 2048
-      envCanvas.height = 1024
-      const ctx = envCanvas.getContext('2d')
-
-      if (ctx) {
-        const gradient = ctx.createLinearGradient(0, 0, 0, envCanvas.height)
-        gradient.addColorStop(0, '#87CEEB')
-        gradient.addColorStop(0.5, '#E0F6FF')
-        gradient.addColorStop(1, '#FFFFFF')
-        ctx.fillStyle = gradient
-        ctx.fillRect(0, 0, envCanvas.width, envCanvas.height)
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
-        for (let i = 0; i < 5; i++) {
-          const x = (envCanvas.width / 5) * i + 200
-          const y = 200 + Math.sin(i) * 50
-          ctx.beginPath()
-          ctx.arc(x, y, 150, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-
-      environmentMap = new THREE.CanvasTexture(envCanvas)
-      environmentMap.mapping = THREE.EquirectangularReflectionMapping
-      environmentMap.needsUpdate = true
-    }
-
-    if (currentMesh) {
-      currentMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          const materials = Array.isArray(child.material) ? child.material : [child.material]
-          materials.forEach((mat) => {
-            if (mat instanceof THREE.MeshStandardMaterial) {
-              mat.envMap = environmentMap
-              mat.needsUpdate = true
-            }
-          })
-        }
-      })
-    }
-  } catch (error) {
-    console.error('Error loading environment map:', error)
-  }
-}
 
 onMounted(async () => {
   await nextTick()
@@ -292,6 +222,13 @@ const onTresReady = (state: any) => {
       controls.enableRotate = true
     }
 
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
+    scene.add(ambientLight)
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
+    directionalLight.position.set(5, 10, 7.5)
+    scene.add(directionalLight)
+
     initSceneAfterTresReady()
   })
 }
@@ -299,22 +236,20 @@ const onTresReady = (state: any) => {
 const initSceneAfterTresReady = () => {
   if (!scene || !camera || !renderer) return
 
-  loadEnvironmentMap().then(() => {
-    if (props.canvas2D) setupSharedCanvasTexture(props.canvas2D)
-    loadModel("https://3d-back-wobz-v2.sh2.hidora.net/downloadSvg?filename=2025/04/24/680a5a7c34e69_2025_03_10_67cee4edc0a55_2024_02_23_65d8b8086988e_22022_05_30_6294959dca46a_12-18_(2).obj")
+  if (props.canvas2D) setupSharedCanvasTexture(props.canvas2D)
+  loadModel("https://3d-back-wobz-v2.sh2.hidora.net/downloadSvg?filename=2025/04/24/680a5a7c34e69_2025_03_10_67cee4edc0a55_2024_02_23_65d8b8086988e_22022_05_30_6294959dca46a_12-18_(2).obj")
 
-    nextTick(() => {
-      if (props.enableDirectEdit && renderer?.domElement) {
-        console.log('Setting up click handler, renderer:', renderer)
-        setupClickHandler()
-      } else {
-        console.warn('Cannot setup click handler:', {
-          enableDirectEdit: props.enableDirectEdit,
-          renderer: !!renderer,
-          domElement: !!renderer?.domElement
-        })
-      }
-    })
+  nextTick(() => {
+    if (props.enableDirectEdit && renderer?.domElement) {
+      console.log('Setting up click handler, renderer:', renderer)
+      setupClickHandler()
+    } else {
+      console.warn('Cannot setup click handler:', {
+        enableDirectEdit: props.enableDirectEdit,
+        renderer: !!renderer,
+        domElement: !!renderer?.domElement
+      })
+    }
   })
 }
 
@@ -378,8 +313,6 @@ const setupClickHandler = () => {
           intersection,
           canvasWidth,
           canvasHeight,
-          props.workZoneTop,
-          props.workZoneBottom
         )
         
         return {
@@ -696,8 +629,6 @@ const onMouseUp = (event: MouseEvent) => {
       intersection,
       canvasWidth,
       canvasHeight,
-      props.workZoneTop,
-      props.workZoneBottom
     )
 
     if (!canvasCoords) return
@@ -736,43 +667,41 @@ const onMouseUp = (event: MouseEvent) => {
     return
   }
 
-  if (clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
-    if (currentMesh) {
-      currentMesh.traverse(mesh => {
-        if (mesh instanceof THREE.Mesh && mesh.geometry && !mesh.geometry.attributes.uv) {
-          generateUVs(mesh.geometry)
-        }
-      })
-    }
+  // if (clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
+  //   if (currentMesh) {
+  //     currentMesh.traverse(mesh => {
+  //       if (mesh instanceof THREE.Mesh && mesh.geometry && !mesh.geometry.attributes.uv) {
+  //         generateUVs(mesh.geometry)
+  //       }
+  //     })
+  //   }
 
-    setTimeout(() => {
-      clickedMesh!.geometry.attributes.uv.needsUpdate = true
+  //   // setTimeout(() => {
+  //   //   clickedMesh!.geometry.attributes.uv.needsUpdate = true
 
-      const retryList = targetMesh ? [targetMesh] : meshesToCheck
-      for (const mesh of retryList) {
-        const newHit = raycaster3D!.intersectObject(mesh!, true)
-        if (newHit.length > 0 && newHit[0].uv) {
-          const coords = project3DClickToCanvas(
-            newHit[0],
-            canvasWidth,
-            canvasHeight,
-            props.workZoneTop,
-            props.workZoneBottom
-          )
-          if (coords) {
-            emit('3d-click', {
-              intersection: newHit[0],
-              canvasX: coords.x,
-              canvasY: coords.y,
-              uv: newHit[0].uv,
-              mesh: clickedMesh
-            })
-          }
-          break
-        }
-      }
-    }, 200)
-  }
+  //   //   const retryList = targetMesh ? [targetMesh] : meshesToCheck
+  //   //   for (const mesh of retryList) {
+  //   //     const newHit = raycaster3D!.intersectObject(mesh!, true)
+  //   //     if (newHit.length > 0 && newHit[0].uv) {
+  //   //       const coords = project3DClickToCanvas(
+  //   //         newHit[0],
+  //   //         canvasWidth,
+  //   //         canvasHeight,
+  //   //       )
+  //   //       if (coords) {
+  //   //         emit('3d-click', {
+  //   //           intersection: newHit[0],
+  //   //           canvasX: coords.x,
+  //   //           canvasY: coords.y,
+  //   //           uv: newHit[0].uv,
+  //   //           mesh: clickedMesh
+  //   //         })
+  //   //       }
+  //   //       break
+  //   //     }
+  //   //   }
+  //   // }, 200)
+  // }
 }
 
   
@@ -950,9 +879,9 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
       if (mesh instanceof THREE.Mesh) {
         meshCount++
         
-        if (mesh.geometry && !mesh.geometry.attributes.uv) {
-          generateUVs(mesh.geometry)
-        }
+        // if (mesh.geometry && !mesh.geometry.attributes.uv) {
+        //   generateUVs(mesh.geometry)
+        // }
         
         if (Array.isArray(mesh.material)) {
           materials.push(...mesh.material)
@@ -964,9 +893,9 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
           if (child instanceof THREE.Mesh) {
             meshCount++
             
-            if (child.geometry && !child.geometry.attributes.uv) {
-              generateUVs(child.geometry)
-            }
+            // if (child.geometry && !child.geometry.attributes.uv) {
+            //   generateUVs(child.geometry)
+            // }
             
             if (Array.isArray(child.material)) {
               materials.push(...child.material)
@@ -1025,123 +954,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
   }
 }
 
-const generateUVs = (geometry) => {
-  const positions = geometry.attributes.position
-  const uvs = []
-  
-  if (!positions || positions.count === 0) {
-    return
-  }
-  
-  let hasInvalidPositions = false
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i)
-    const y = positions.getY(i)
-    const z = positions.getZ(i)
-    if (isNaN(x) || isNaN(y) || isNaN(z) || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
-      hasInvalidPositions = true
-      break
-    }
-  }
-  
-  if (hasInvalidPositions) {
-    return
-  }
-  
-  const box = new THREE.Box3().setFromBufferAttribute(positions)
-  const size = box.getSize(new THREE.Vector3())
-  const center = box.getCenter(new THREE.Vector3())
-  
-  if (size.x === 0 && size.y === 0 && size.z === 0) {
-    size.x = size.x || 1
-    size.y = size.y || 1
-    size.z = size.z || 1
-  }
-  
-  if (isNaN(size.x) || isNaN(size.y) || isNaN(size.z) || 
-      isNaN(center.x) || isNaN(center.y) || isNaN(center.z)) {
-    return
-  }
-  
-  const isCylindrical = size.y > size.x * 0.8 && size.y > size.z * 0.8
-  const isWide = size.x > size.y * 1.5 || size.z > size.y * 1.5
-  
-  if (isCylindrical) {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const y = positions.getY(i) - center.y
-      const z = positions.getZ(i) - center.z
-      
-      const angle = Math.atan2(z, x)
-      let u = 1 - ((angle / (2 * Math.PI)) + 0.5)
-      
-      let v = size.y > 0 ? 1 - ((y + size.y / 2) / size.y) : 0.5
-      
-      if (isNaN(u) || !isFinite(u)) u = 0.5
-      if (isNaN(v) || !isFinite(v)) v = 0.5
-      
-      uvs.push(Math.max(0, Math.min(1, u)))
-      uvs.push(Math.max(0, Math.min(1, v)))
-    }
-  } else if (isWide) {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const z = positions.getZ(i) - center.z
-      
-      let u = size.x > 0 ? 1 - ((x + size.x / 2) / size.x) : 0.5
-      let v = size.z > 0 ? 1 - ((z + size.z / 2) / size.z) : 0.5
-      
-      if (isNaN(u) || !isFinite(u)) u = 0.5
-      if (isNaN(v) || !isFinite(v)) v = 0.5
-      
-      uvs.push(Math.max(0, Math.min(1, u)))
-      uvs.push(Math.max(0, Math.min(1, v)))
-    }
-  } else {
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i) - center.x
-      const y = positions.getY(i) - center.y
-      const z = positions.getZ(i) - center.z
-      
-      const length = Math.sqrt(x * x + y * y + z * z)
-      if (length > 0.0001) {
-        const nx = x / length
-        const ny = y / length
-        const nz = z / length
-        
-        let u = 1 - ((Math.atan2(nz, nx) / (2 * Math.PI)) + 0.5)
-        let v = 1 - ((Math.asin(ny) / Math.PI) + 0.5)
-        
-        if (isNaN(u) || !isFinite(u)) u = 0.5
-        if (isNaN(v) || !isFinite(v)) v = 0.5
-        
-        uvs.push(Math.max(0, Math.min(1, u)))
-        uvs.push(Math.max(0, Math.min(1, v)))
-      } else {
-        uvs.push(0.5, 0.5)
-      }
-    }
-  }
-  
-  let hasInvalidUVs = false
-  for (let i = 0; i < uvs.length; i++) {
-    if (isNaN(uvs[i]) || !isFinite(uvs[i])) {
-      hasInvalidUVs = true
-      uvs[i] = 0.5
-    }
-  }
-  
-  if (uvs.length !== positions.count * 2) {
-    return
-  }
-  
-  try {
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    geometry.attributes.uv.needsUpdate = true
-  } catch (error) {
-  }
-}
-
 const applyTexture = (texture: THREE.Texture | null) => {
   if (!currentMesh) {
     return
@@ -1163,15 +975,15 @@ const applyTexture = (texture: THREE.Texture | null) => {
     if (child instanceof THREE.Mesh) {
       meshCount++
       
-      if (child.geometry && !child.geometry.attributes.uv) {
-        generateUVs(child.geometry)
-      }
+      // if (child.geometry && !child.geometry.attributes.uv) {
+      //   generateUVs(child.geometry)
+      // }
       
       if (Array.isArray(child.material)) {
         child.material.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
             mat.map = texture
-            mat.envMap = environmentMap
+
             mat.transparent = true
             mat.opacity = 0.9
             mat.alphaTest = 0.01
@@ -1183,7 +995,7 @@ const applyTexture = (texture: THREE.Texture | null) => {
           } else {
             child.material[idx] = new THREE.MeshStandardMaterial({
               map: texture,
-              envMap: environmentMap,
+
               side: THREE.DoubleSide,
               transparent: true,
               opacity: 0.9,
@@ -1196,7 +1008,7 @@ const applyTexture = (texture: THREE.Texture | null) => {
       } else {
         if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshPhongMaterial) {
           child.material.map = texture
-          child.material.envMap = environmentMap
+
           child.material.transparent = true
           child.material.opacity = 0.9
           child.material.alphaTest = 0.01
@@ -1208,7 +1020,7 @@ const applyTexture = (texture: THREE.Texture | null) => {
         } else {
           child.material = new THREE.MeshStandardMaterial({
             map: texture,
-            envMap: environmentMap,
+
             side: THREE.DoubleSide,
             transparent: true,
             opacity: 0.9,

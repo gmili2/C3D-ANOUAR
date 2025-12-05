@@ -7,7 +7,7 @@
           <h3>🎯 Vue 3D - Modèle</h3>
         </div>
         <div v-if="true" class="debug-rotation-preview">
-        <div class="debug-header">Preview Shader ({{ Math.round(tempCanvasAngle) }}°)</div>
+        <div class="debug-header">Preview Shader</div>
         <img :src="tempCanvasDataUrl" alt="Debug Preview" />
       </div>
       <ThreeScene 
@@ -41,7 +41,6 @@
           :canvas-width="500"
           :canvas-height="500"
           :update-texture-direct="() => threeSceneRef?.updateTextureDirect?.()"
-          @design-updated="onDesignUpdated"
           @canvas-ready="onFabricCanvasReady"
           @placement-mode-changed="onPlacementModeChanged"
           @object-selected="onObjectSelected"
@@ -64,17 +63,13 @@ import * as THREE from 'three'
 const threeSceneRef = ref(null)      // Référence au composant ThreeScene (affichage 3D)
 const fabricDesignerRef = ref(null)  // Référence au composant FabricDesigner (canvas 2D)
 const appliedTexture = ref(null)            // Texture Three.js appliquée sur le modèle 3D
-const realTimeUpdateEnabled = ref(true)      // Activer/désactiver les mises à jour en temps réel
-let updateTextureTimeout = null              // Timeout pour debounce les mises à jour de texture
 const fabricCanvasElement = ref(null)        // Référence au canvas HTML Fabric.js (pour la texture partagée)
-const canvasObjects = ref([])                // Liste de tous les objets sur le canvas Fabric
 
 const placementMode = ref(false)  // Mode de placement actif (clic sur 3D pour placer)
 const placementType = ref(null)   // Type d'élément à placer: 'circle', 'rectangle', 'text', 'image'
 const dragMode = ref(false)       // Mode drag actif pour déplacer un objet sélectionné
 const useDecalOptimization = ref(true)  // Activer/désactiver l'optimisation Decal pour la rotation
-const tempCanvasDataUrl = ref(null)  // URL de l'image du tempCanvas pour débogage
-const tempCanvasAngle = ref(0)  // Angle actuel de l'objet
+const tempCanvasDataUrl = ref(null)  // URL de l'image du tempCanvas pour débogage (rotation optimisée)
 const isDragging = ref(false)    // Indique si on est en train de glisser un objet
 
 
@@ -241,7 +236,6 @@ const on3DRotationStart = (rotationData) => {
     
     // 4️⃣ Stocker pour affichage de débogage
     tempCanvasDataUrl.value = dataUrl
-    // tempCanvasAngle.value = currentAngle
     
     // 5️⃣ Calculer le centre de l'objet pour un positionnement précis
     const center = activeObject.getCenterPoint()
@@ -351,7 +345,6 @@ const on3DRotationEnd = () => {
     
     // Réinitialiser l'affichage du tempCanvas
     tempCanvasDataUrl.value = null
-    tempCanvasAngle.value = 0
   }
 
   // 🔓 RÉACTIVER OrbitControls pour permettre la rotation du goblet
@@ -455,10 +448,7 @@ const onPlacementModeChanged = (modeData) => {
   }
 }
 
-const selectedObject = ref(null)
-
 const onObjectSelected = (data) => {
-  selectedObject.value = data.object
   dragMode.value = true
   
   // Activer le mode drag dans ThreeScene
@@ -476,7 +466,6 @@ const onObjectSelected = (data) => {
 }
 
 const onObjectDeselected = () => {
-  selectedObject.value = null
   dragMode.value = false
   isDragging.value = false
   
@@ -496,14 +485,12 @@ const onObjectDeselected = () => {
 
 
 const on3DClickOutside = () => {
-  
   // Désélectionner l'objet dans FabricDesigner
   if (fabricDesignerRef.value && fabricDesignerRef.value.deselectObject) {
     fabricDesignerRef.value.deselectObject()
   }
   
   // Mettre à jour l'état local
-  selectedObject.value = null
   dragMode.value = false
   isDragging.value = false
   
@@ -526,24 +513,13 @@ const updateAllObjectsList = () => {
   
   const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
   
-  // Mettre à jour la liste locale pour l'affichage
-  canvasObjects.value = objects.map((obj, index) => ({
-    id: obj.id || `obj-${index}`,
-    type: obj.type || 'unknown',
-    left: obj.left || 0,
-    top: obj.top || 0,
-    width: (obj.width || (obj.radius ? obj.radius * 2 : 0)) * (obj.scaleX || 1),
-    height: (obj.height || (obj.radius ? obj.radius * 2 : 0)) * (obj.scaleY || 1)
-  }))
-  
   // Mettre à jour la liste dans ThreeScene
   if (threeSceneRef.value && threeSceneRef.value.updateObjectsListFromCanvas) {
     threeSceneRef.value.updateObjectsListFromCanvas(objects)
   }
 }
 
-const onMoveObject = (data) => {
-  // Cette fonction peut être utilisée pour des actions supplémentaires
+const onMoveObject = () => {
   // Mettre à jour la liste des objets après déplacement
   updateAllObjectsList()
 }
@@ -599,7 +575,6 @@ const currentResizeHandle = ref(null)
 
 const isRotating = ref(false)
 
-const dragStartPos = ref({ x: 0, y: 0 })
 const dragOffset = ref({ x: 0, y: 0 })
 
 /**
@@ -661,7 +636,6 @@ const on3DDragStart = (clickData) => {
         y: clickData.canvasY - objTop
       }
       
-      dragStartPos.value = { x: clickData.canvasX, y: clickData.canvasY }
     }
   }
   
@@ -1004,7 +978,6 @@ const on3DDragEnd = () => {
   
   // Réinitialiser le décalage
   dragOffset.value = { x: 0, y: 0 }
-  dragStartPos.value = { x: 0, y: 0 }
   
   // Réinitialiser le style de hover
   if (fabricDesignerRef.value && fabricDesignerRef.value.resetResizeHover) {
@@ -1051,14 +1024,6 @@ const on3DScale = (scaleData) => {
   }
 }
 
-const onDesignUpdated = () => {
-  // Avec le nouveau système, la mise à jour est automatique via le store
-  // On garde l'ancien système en fallback si nécessaire
-  if (!realTimeUpdateEnabled.value) {
-    updateTextureRealTime()
-  }
-}
-
 const onFabricCanvasReady = (htmlCanvas) => {
   fabricCanvasElement.value = htmlCanvas
   
@@ -1069,46 +1034,6 @@ const onFabricCanvasReady = (htmlCanvas) => {
   
   // Mettre à jour la liste de tous les objets
   updateAllObjectsList()
-}
-
-const updateTextureRealTime = () => {
-  // Debounce updates to avoid too frequent texture updates
-  if (updateTextureTimeout) {
-    clearTimeout(updateTextureTimeout)
-  }
-  
-  updateTextureTimeout = setTimeout(() => {
-    if (!fabricDesignerRef.value || !threeSceneRef.value || !hasModel.value) return
-    
-    const canvasTexture = fabricDesignerRef.value.getCanvasAsTexture()
-    if (!canvasTexture) {
-      return
-    }
-    
-    try {
-      // Dispose old texture if exists
-      if (appliedTexture.value) {
-        appliedTexture.value.dispose()
-      }
-
-      // Create Three.js texture from canvas
-      const texture = new THREE.CanvasTexture(canvasTexture)
-      texture.flipY = false
-      texture.needsUpdate = true
-      texture.format = THREE.RGBAFormat
-      texture.minFilter = THREE.LinearFilter
-      texture.magFilter = THREE.LinearFilter
-
-      // Apply texture
-      appliedTexture.value = texture
-      
-      // Also use the method from ThreeScene component
-      if (threeSceneRef.value.applyTexture) {
-        threeSceneRef.value.applyTexture(texture)
-      }
-    } catch (error) {
-    }
-  }, 200) // Debounce de 200ms pour laisser le temps au canvas de se rendre
 }
 
 onMounted(async () => {

@@ -2676,37 +2676,43 @@ const enableOrbitControls = () => {
 }
 
 defineExpose({
+  // Rotation optimisée (Decal)
   startDecalRotation,
   updateDecalRotation,
   endDecalRotation,
-  disableOrbitControls,  // ✅ NOUVEAU
-  enableOrbitControls,   // ✅ NOUVEAU
-  getCurrentMesh: () => currentMesh,
+  
+  // Contrôles OrbitControls
+  disableOrbitControls,
+  enableOrbitControls,
+  
+  // Texture
   applyTexture,
-  getCanvasTexture: () => canvasTexture,
   setupSharedCanvasTexture: (canvas: HTMLCanvasElement) => {
     if (canvas && currentMesh) {
       setupSharedCanvasTexture(canvas)
     }
   },
-  highlightMesh,
-  highlightAllMeshes,
-  setActiveMesh,
-  getAllMeshes: () => allMeshes,
+  updateTextureDirect, // Utilisé via prop dans FabricDesigner
+  
+  // Sélection et placement
   setPlacementMode,
-  setDragMode,
-  setResizing,
-  setDragState,
   updateSelectedObjectCoords,
   updateObjectsListFromCanvas,
+  
+  // Drag
+  setDragMode,
+  setDragState,
+  
+  // Resize
+  setResizing,
+  
+  // Rotation modèle et handles
   rotateModel,
-  scaleModel,
   setRotationHandleHover,
   setDetectedControl,
-  // resetRotationState,
-  updateTextureDirect, // Méthode pour mise à jour directe (plus rapide)
-  renderer: () => renderer,
-  emit
+  
+  // Renderer (pour accéder au DOM)
+  renderer: () => renderer
 })
 </script>
 

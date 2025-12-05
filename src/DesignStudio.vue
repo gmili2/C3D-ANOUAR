@@ -673,6 +673,48 @@ const on3DClickForPlacement = (clickData) => {
     return
   }
   
+  // ========================================================================
+  // VÉRIFICATION: CLIC SUR UN OBJET EXISTANT OU ZONE VIDE ?
+  // ========================================================================
+  // Si le flag checkForObject est présent, on doit vérifier s'il y a un objet
+  // à cette position. Si aucun objet n'est trouvé, on désélectionne tout.
+  if (clickData.checkForObject && fabricDesignerRef.value) {
+    const canvas = fabricDesignerRef.value.getCanvas()
+    if (canvas) {
+      // Chercher un objet à la position du clic
+      const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)
+      
+      if (found) {
+        // Un objet a été trouvé et sélectionné
+        // Activer le mode drag pour pouvoir déplacer immédiatement
+        dragMode.value = true
+        if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+          threeSceneRef.value.setDragMode(true)
+        }
+        console.log('✅ Objet trouvé et sélectionné à la position du clic')
+      } else {
+        // Aucun objet trouvé à cette position
+        // Désélectionner tous les objets du canvas
+        console.log('❌ Aucun objet trouvé - Désélection de tous les objets')
+        canvas.discardActiveObject()
+        canvas.requestRenderAll()
+        
+        // Désactiver le mode drag
+        dragMode.value = false
+        if (threeSceneRef.value && threeSceneRef.value.setDragMode) {
+          threeSceneRef.value.setDragMode(false)
+        }
+        
+        // Mettre à jour la liste des objets pour refléter la désélection
+        nextTick(() => {
+          updateAllObjectsList()
+        })
+      }
+    }
+    return
+  }
+  
+  // Comportement par défaut (sans checkForObject)
   // Sinon, sélectionner l'objet à cette position sur le modèle 3D
   if (fabricDesignerRef.value && fabricDesignerRef.value.selectObjectAtPosition) {
     const found = fabricDesignerRef.value.selectObjectAtPosition(clickData.canvasX, clickData.canvasY)

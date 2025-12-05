@@ -1,0 +1,82 @@
+{
+  "camera": {
+    "position": {
+      "x": 0,
+      "y": 16,
+      "z": 29,
+      "description": "Position initiale de la caméra dans l'espace 3D"
+    },
+    "target": {
+      "x": 0,
+      "y": 9,
+      "z": 0,
+      "description": "Point vers lequel la caméra regarde"
+    },
+    "fov": 75,
+    "near": 0.1,
+    "far": 1000
+  },
+  "orbitControls": {
+    "minDistance": 37,
+    "maxDistance": 50,
+    "minPolarAngle": 1.37,
+    "maxPolarAngle": 1.57,
+    "dampingFactor": 0.05,
+    "enableZoom": true,
+    "enableRotate": true,
+    "enablePan": false,
+    "description": {
+      "minDistance": "Distance minimale de zoom (caméra ne peut pas s'approcher plus)",
+      "maxDistance": "Distance maximale de zoom (caméra ne peut pas s'éloigner plus)",
+      "minPolarAngle": "Angle vertical minimum en radians (~78.5°)",
+      "maxPolarAngle": "Angle vertical maximum en radians (~90°)",
+      "dampingFactor": "Facteur d'amortissement pour un mouvement fluide (0-1)",
+      "enableZoom": "Active/désactive le zoom avec la molette",
+      "enableRotate": "Active/désactive la rotation de la caméra",
+      "enablePan": "Active/désactive le déplacement latéral (pan)"
+    }
+  },
+  "presets": {
+    "default": {
+      "name": "Vue par défaut",
+      "position": { "x": 0, "y": 16, "z": 29 },
+      "target": { "x": 0, "y": 9, "z": 0 },
+      "minDistance": 37,
+      "maxDistance": 50,
+      "minPolarAngle": 1.37,
+      "maxPolarAngle": 1.57
+    },
+    "topView": {
+      "name": "Vue de dessus",
+      "position": { "x": 0, "y": 50, "z": 0 },
+      "target": { "x": 0, "y": 0, "z": 0 },
+      "minDistance": 30,
+      "maxDistance": 100,
+      "minPolarAngle": 0,
+      "maxPolarAngle": 0
+    },
+    "sideView": {
+      "name": "Vue de côté",
+      "position": { "x": 40, "y": 0, "z": 0 },
+      "target": { "x": 0, "y": 0, "z": 0 },
+      "minDistance": 30,
+      "maxDistance": 100,
+      "minPolarAngle": 1.57,
+      "maxPolarAngle": 1.57
+    },
+    "freeRotation": {
+      "name": "Rotation libre",
+      "position": { "x": 0, "y": 20, "z": 30 },
+      "target": { "x": 0, "y": 0, "z": 0 },
+      "minDistance": 10,
+      "maxDistance": 100,
+      "minPolarAngle": 0,
+      "maxPolarAngle": 3.14
+    }
+  },
+  "notes": {
+    "polarAngle": "0 = vue du dessus, π/2 (1.57) = vue horizontale, π (3.14) = vue du dessous",
+    "radiansToDegrees": "radians × (180/π) = degrés",
+    "degreesToRadians": "degrés × (π/180) = radians"
+  }
+}

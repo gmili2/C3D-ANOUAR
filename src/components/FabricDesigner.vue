@@ -76,32 +76,7 @@ const canvasHeight = props.canvasHeight || 600
 
 const { requestTextureUpdate, requestTextureUpdateImmediate } = useCanvasTextureStore()
 
-let history = []
-let historyIndex = -1
-const maxHistorySize = 50
-let isUndoRedoInProgress = false
 
-const canUndo = computed(() => {
-  return canvas && historyIndex > 0
-})
-
-const canRedo = computed(() => {
-  return canvas && historyIndex < history.length - 1
-})
-
-const saveHistory = () => {
-  if (!canvas || isUndoRedoInProgress) return
-  const json = JSON.stringify(canvas.toJSON())
-  if (historyIndex < history.length - 1) {
-    history = history.slice(0, historyIndex + 1)
-  }
-  history.push(json)
-  historyIndex = history.length - 1
-  if (history.length > maxHistorySize) {
-    history.shift()
-    historyIndex = history.length - 1
-  }
-}
 
 const hasSelection = ref(false)
 
@@ -887,8 +862,7 @@ const initCanvas = () => {
       emit('design-updated', canvas) // Émettre l'événement
     }
 
-    // Sauvegarder l'état initial
-    saveHistory()
+
     
     // Écouter quand un objet est sélectionné pour activer le mode drag sur 3D
     // Mettre à jour la liste quand un objet est sélectionné
@@ -1034,13 +1008,13 @@ const initCanvas = () => {
 
     })
     
-    // Écouter tous les événements de modification et sauvegarder l'historique
+    // Écouter tous les événements de modification
     canvas.on('path:created', () => {
-      saveHistory()
+
       signalChange()
     })
     canvas.on('object:added', () => {
-      saveHistory()
+
       signalChange()
       // Notifier le parent pour mettre à jour la liste des objets
       emit('objects-changed')
@@ -1076,7 +1050,7 @@ const initCanvas = () => {
       if (obj && !obj.userData?.isWrapAroundCopy) {
         removeWrapAroundCopies(obj)
       }
-      saveHistory()
+
       signalChange()
       // Notifier le parent pour mettre à jour la liste des objets
       emit('objects-changed')
@@ -1139,7 +1113,7 @@ const initCanvas = () => {
               // Utiliser la première copie disponible
               replaceOriginalWithCopy(obj, copies[0])
               // Ne pas continuer car l'objet original a été remplacé
-              saveHistory()
+
               signalChange()
               return
             }
@@ -1147,7 +1121,7 @@ const initCanvas = () => {
         }
       }
       
-      saveHistory()
+
       signalChange()
     })
     // Événement pendant le redimensionnement (scaling en cours)
@@ -1217,7 +1191,7 @@ const initCanvas = () => {
         }
       }
       
-      saveHistory()
+
       signalChange()
     })
     canvas.on('object:rotated', (e) => {
@@ -1256,11 +1230,11 @@ const initCanvas = () => {
         })
       }
       
-      saveHistory()
+
       signalChange()
     })
     canvas.on('object:skewed', () => {
-      saveHistory()
+
       signalChange()
     })
     
@@ -1480,40 +1454,7 @@ const initCanvas = () => {
   }
 }
 
-// Fonctions undo/redo
-const undo = () => {
-  if (!canvas || !canUndo.value) return
-  
-  isUndoRedoInProgress = true
-  historyIndex--
-  if (historyIndex >= 0 && history[historyIndex]) {
-    canvas.loadFromJSON(history[historyIndex], () => {
-      canvas.renderAll()
-      requestTextureUpdate()
-      emit('design-updated', canvas)
-      isUndoRedoInProgress = false
-    })
-  } else {
-    isUndoRedoInProgress = false
-  }
-}
 
-const redo = () => {
-  if (!canvas || !canRedo.value) return
-  
-  isUndoRedoInProgress = true
-  historyIndex++
-  if (historyIndex < history.length && history[historyIndex]) {
-    canvas.loadFromJSON(history[historyIndex], () => {
-      canvas.renderAll()
-      requestTextureUpdate()
-      emit('design-updated', canvas)
-      isUndoRedoInProgress = false
-    })
-  } else {
-    isUndoRedoInProgress = false
-  }
-}
 
 // Fonction pour supprimer l'élément sélectionné
 const deselectObject = () => {
@@ -1542,14 +1483,7 @@ const deleteSelected = () => {
     canvas.renderAll()
     requestTextureUpdate()
     emit('design-updated', canvas)
-    
-    // Sauvegarder dans l'historique
-    const json = JSON.stringify(canvas.toJSON())
-    if (historyIndex < history.length - 1) {
-      history = history.slice(0, historyIndex + 1)
-    }
-    history.push(json)
-    historyIndex = history.length - 1
+
   }
 }
 
@@ -1613,16 +1547,7 @@ const drawWorkZoneIndicators = () => {
 // Configuration des raccourcis clavier
 const setupKeyboardShortcuts = () => {
   const handleKeyDown = (e) => {
-    // Ctrl+Z pour undo
-    if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
-      e.preventDefault()
-      undo()
-    }
-    // Ctrl+Y ou Ctrl+Shift+Z pour redo
-    if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
-      e.preventDefault()
-      redo()
-    }
+
     // Suppr ou Delete pour supprimer
     if ((e.key === 'Delete' || e.key === 'Backspace') && hasSelection.value) {
       e.preventDefault()
@@ -2825,8 +2750,7 @@ defineExpose({
   resetResizeData,
   highlightResizeHandle,
   resetResizeHover,
-  undo,
-  redo,
+
   deleteSelected,
   deselectObject,
   activateRotationMode

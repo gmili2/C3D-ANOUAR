@@ -13,8 +13,6 @@
           ref="threeSceneRef"
           :texture="appliedTexture"
           :canvas2D="fabricCanvasElement"
-          :enable-direct-edit="true"
-          :drag-mode="dragMode"
           @texture-ready="onTextureReady"
           @3d-click="on3DClickForPlacement"
           @3d-click-outside="on3DClickOutside"
@@ -25,7 +23,6 @@
           @3d-drag="on3DDrag"
           @3d-drag-start="on3DDragStart"
           @3d-drag-end="on3DDragEnd"
-          @3d-scale="on3DScale"
           @3d-resize-start="on3DResizeStart"
           @3d-resize="on3DResize"
           @3d-resize-end="on3DResizeEnd"
@@ -76,7 +73,6 @@ const {
   on3DDrag,
   on3DDragStart,
   on3DDragEnd,
-  on3DScale,
   on3DResizeStart,
   on3DResize,
   on3DResizeEnd,

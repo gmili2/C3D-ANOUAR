@@ -1,6 +1,5 @@
 <template>
  <div class="three-scene-container">
-  <pre class="text-white bg-black"> {{ orbitControlsEnabled }}</pre>
   <TresCanvas
     ref="tresCanvasRef"
     clear-color="#40475B"
@@ -23,8 +22,6 @@
     v-if="canvasTexture && renderer && scene && camera"
     ref="textureUpdaterRef"
     :texture="canvasTexture"
-    :renderer="renderer"
-    :scene="scene"
     :camera="camera"
   />
 </div>
@@ -33,7 +30,7 @@
 
 <script setup lang="ts">
 
-import { ref, shallowRef, onMounted, onUnmounted, watch, nextTick, markRaw, type PropType } from 'vue'
+import { ref, shallowRef, watch, nextTick, markRaw, type PropType } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
@@ -52,14 +49,6 @@ const props = defineProps({
     type: Object as PropType<HTMLCanvasElement | null>,
     default: null
   },
-  enableDirectEdit: {
-    type: Boolean,
-    default: true
-  },
-  dragMode: {
-    type: Boolean,
-    default: false
-  }
 })
 
 const emit = defineEmits<{
@@ -69,7 +58,6 @@ const emit = defineEmits<{
   (e: '3d-drag', data: { canvasX: number; canvasY: number }): void
   (e: '3d-drag-start', data: { canvasX: number; canvasY: number }): void
   (e: '3d-drag-end'): void
-  (e: '3d-scale', data: { scaleFactor: number }): void
   (e: '3d-resize-start', data: { canvasX: number; canvasY: number; handleInfo: any }): void
   (e: '3d-resize', data: { canvasX: number; canvasY: number; startX: number; startY: number; handleInfo: any }): void
   (e: '3d-resize-end'): void
@@ -138,37 +126,20 @@ const selectedObjectCoords = ref({
 })
 
 const isNearRotationHandle = ref(false)
-const detectedControl = ref({
-  show: false,
-  handle: null as string | null,
-  corner: null as string | null,
-  edge: null as string | null,
-  isRotation: false,
-  distance: null as number | null,
-  x: null as number | null,
-  y: null as number | null
-})
+
 
 let isUpdatingSelectedObject = false
-let isUpdatingObjectsList = false
-
-const allObjectsList = ref<any[]>([])
 
 
 
-onMounted(async () => {
-  await nextTick()
-})
 
-watch(() => props.canvas2D, (newCanvas, oldCanvas) => {
+watch(() => props.canvas2D, (newCanvas) => {
   if (newCanvas && currentMesh) {
     setupSharedCanvasTexture(newCanvas)
   }
 }, { deep: true })
 
-onUnmounted(() => {
-  cleanup()
-})
+
 
 watch(() => props.texture, (newTexture) => {
   if (currentMesh && newTexture) {
@@ -240,12 +211,11 @@ const initSceneAfterTresReady = () => {
   loadModel("https://3d-back-wobz-v2.sh2.hidora.net/downloadSvg?filename=2025/04/24/680a5a7c34e69_2025_03_10_67cee4edc0a55_2024_02_23_65d8b8086988e_22022_05_30_6294959dca46a_12-18_(2).obj")
 
   nextTick(() => {
-    if (props.enableDirectEdit && renderer?.domElement) {
+    if (renderer?.domElement) {
       console.log('Setting up click handler, renderer:', renderer)
       setupClickHandler()
     } else {
       console.warn('Cannot setup click handler:', {
-        enableDirectEdit: props.enableDirectEdit,
         renderer: !!renderer,
         domElement: !!renderer?.domElement
       })
@@ -337,7 +307,6 @@ const setupClickHandler = () => {
     event.preventDefault()
   }
 
-  if (!props.dragMode) return
 
   const canvasCoords = getCanvasCoords(event)
   if (!canvasCoords) return
@@ -499,7 +468,6 @@ const setupClickHandler = () => {
 
   emit('3d-hover', { canvasX: canvasCoords.x, canvasY: canvasCoords.y })
 
-  if (!props.dragMode) return
 
   if (isRotating3D && rotationStartPosition && rotationStartCursor && selectedObjectCoords.value.show && rotationCenter) {
     const centerX = rotationCenter.x
@@ -544,9 +512,9 @@ const onMouseUp = (event: MouseEvent) => {
     rotationJustEnded = true
     rotationEndTime = Date.now()
 
-    if (renderer?.domElement) {
-      renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
-    }
+    // if (renderer?.domElement) {
+    //   renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
+    // }
 
     if (controls) {
       controls.enabled = true
@@ -572,9 +540,9 @@ const onMouseUp = (event: MouseEvent) => {
       orbitControlsEnabled.value = true
     }
 
-    if (renderer?.domElement) {
-      renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
-    }
+    // if (renderer?.domElement) {
+    //   renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
+    // }
 
     if (controls) {
       controls.enabled = true
@@ -666,56 +634,8 @@ const onMouseUp = (event: MouseEvent) => {
 
     return
   }
-
-  // if (clickedMesh instanceof THREE.Mesh && clickedMesh.geometry) {
-  //   if (currentMesh) {
-  //     currentMesh.traverse(mesh => {
-  //       if (mesh instanceof THREE.Mesh && mesh.geometry && !mesh.geometry.attributes.uv) {
-  //         generateUVs(mesh.geometry)
-  //       }
-  //     })
-  //   }
-
-  //   // setTimeout(() => {
-  //   //   clickedMesh!.geometry.attributes.uv.needsUpdate = true
-
-  //   //   const retryList = targetMesh ? [targetMesh] : meshesToCheck
-  //   //   for (const mesh of retryList) {
-  //   //     const newHit = raycaster3D!.intersectObject(mesh!, true)
-  //   //     if (newHit.length > 0 && newHit[0].uv) {
-  //   //       const coords = project3DClickToCanvas(
-  //   //         newHit[0],
-  //   //         canvasWidth,
-  //   //         canvasHeight,
-  //   //       )
-  //   //       if (coords) {
-  //   //         emit('3d-click', {
-  //   //           intersection: newHit[0],
-  //   //           canvasX: coords.x,
-  //   //           canvasY: coords.y,
-  //   //           uv: newHit[0].uv,
-  //   //           mesh: clickedMesh
-  //   //         })
-  //   //       }
-  //   //       break
-  //   //     }
-  //   //   }
-  //   // }, 200)
-  // }
 }
 
-  
-  const onMouseWheel = (event: WheelEvent) => {
-    if (!props.dragMode) return
-    
-    event.preventDefault()
-    event.stopPropagation()
-    
-    const delta = event.deltaY > 0 ? 1 : -1
-    const scaleFactor = 1 + (delta * 0.02)
-    
-    emit('3d-scale', { scaleFactor })
-  }
   
   if (!renderer || !renderer.domElement) {
     console.error('setupClickHandler: renderer.domElement not available')
@@ -725,32 +645,11 @@ const onMouseUp = (event: MouseEvent) => {
   const canvas = renderer.domElement
   console.log('Attaching event listeners to canvas:', canvas)
   
-  if (window._threeSceneDragHandlers) {
-    canvas.removeEventListener('mousedown', window._threeSceneDragHandlers.onMouseDown)
-    canvas.removeEventListener('mousemove', window._threeSceneDragHandlers.onMouseMove)
-    canvas.removeEventListener('mouseup', window._threeSceneDragHandlers.onMouseUp)
-    canvas.removeEventListener('click', window._threeSceneDragHandlers.onCanvasClick)
-    canvas.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
-  }
-  
   canvas.addEventListener('mousedown', onMouseDown)
   canvas.addEventListener('mousemove', onMouseMove)
   canvas.addEventListener('mouseup', onMouseUp)
   canvas.addEventListener('click', onCanvasClick)
   canvas.addEventListener('wheel', onMouseWheel, { passive: false })
-  
-  console.log('Event listeners attached successfully')
-  
-  window._threeSceneDragHandlers = {
-    onMouseDown,
-    onMouseMove,
-    onMouseUp,
-    onCanvasClick,
-    onMouseWheel
-  }
-  
-  window._threeSceneClickHandler = onCanvasClick
-  
 }
 
 function normalizeModel(obj, targetSize = 8.5) {
@@ -878,11 +777,7 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
     targetMeshes.forEach((mesh) => {
       if (mesh instanceof THREE.Mesh) {
         meshCount++
-        
-        // if (mesh.geometry && !mesh.geometry.attributes.uv) {
-        //   generateUVs(mesh.geometry)
-        // }
-        
+    
         if (Array.isArray(mesh.material)) {
           materials.push(...mesh.material)
         } else if (mesh.material) {
@@ -892,10 +787,6 @@ const setupSharedCanvasTexture = (htmlCanvas: HTMLCanvasElement) => {
         mesh.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             meshCount++
-            
-            // if (child.geometry && !child.geometry.attributes.uv) {
-            //   generateUVs(child.geometry)
-            // }
             
             if (Array.isArray(child.material)) {
               materials.push(...child.material)
@@ -975,10 +866,6 @@ const applyTexture = (texture: THREE.Texture | null) => {
     if (child instanceof THREE.Mesh) {
       meshCount++
       
-      // if (child.geometry && !child.geometry.attributes.uv) {
-      //   generateUVs(child.geometry)
-      // }
-      
       if (Array.isArray(child.material)) {
         child.material.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhongMaterial) {
@@ -1035,96 +922,7 @@ const applyTexture = (texture: THREE.Texture | null) => {
   
 }
 
-const cleanup = () => {
-  if (canvasTexture) {
-    canvasTexture.dispose()
-    canvasTexture = null
-  }
 
-  if (currentMesh) {
-    if (scene) scene.remove(currentMesh)
-    
-    if (currentMesh instanceof THREE.Mesh) {
-      if (currentMesh.geometry) currentMesh.geometry.dispose()
-      if (currentMesh.material) {
-        if (Array.isArray(currentMesh.material)) {
-          currentMesh.material.forEach((mat: THREE.Material) => mat.dispose())
-        } else {
-          currentMesh.material.dispose()
-        }
-      }
-    }
-    currentMesh = null
-  }
-
-  if (controls) {
-    controls.dispose()
-    controls = null
-  }
-
-  if (renderer) {
-    renderer.dispose()
-    renderer = null
-  }
-
-  if (window._threeSceneClickHandler && renderer) {
-    renderer.domElement.removeEventListener('click', window._threeSceneClickHandler)
-    delete window._threeSceneClickHandler
-  }
-  
-  if (window._threeSceneDragHandlers && window._threeSceneDragHandlers.onMouseWheel && renderer) {
-    renderer.domElement.removeEventListener('wheel', window._threeSceneDragHandlers.onMouseWheel)
-  }
-  
-  raycaster3D = null
-
-  scene = null
-  camera = null
-}
-
-const setPlacementMode = (active: boolean, type: string) => {
-  if (renderer && renderer.domElement) {
-    if (active) {
-      renderer.domElement.style.cursor = 'crosshair'
-    } else {
-      renderer.domElement.style.cursor = 'default'
-    }
-  }
-}
-
-const setDragMode = (active: boolean) => {
-  if (renderer && renderer.domElement) {
-    if (active) {
-      renderer.domElement.style.setProperty('cursor', 'move', 'important')
-    } else {
-      renderer.domElement.style.setProperty('cursor', 'default', 'important')
-    }
-  }
-}
-
-const setResizing = (resizing: boolean, startPos: { x: number; y: number } | null, handleInfo: any) => {
-  isResizing3D = resizing
-  if (resizing) {
-    resizeStartPosition = startPos
-    resizeHandleInfo = handleInfo
-    isDragging3D = true
-    if (renderer && renderer.domElement) {
-      renderer.domElement.style.setProperty('cursor', 'move', 'important')
-    }
-  } else {
-    resizeStartPosition = null
-    resizeHandleInfo = null
-  }
-}
-
-const setDragState = (dragging: boolean) => {
-  isDragging3D = dragging
-  if (dragging) {
-    if (renderer && renderer.domElement) {
-      renderer.domElement.style.setProperty('cursor', 'move', 'important')
-    }
-  }
-}
 
 const updateSelectedObjectCoords = (obj: any) => {
   if (isUpdatingSelectedObject) {
@@ -1250,147 +1048,6 @@ const calculateControlCoordinates = (obj: any, skipSetCoords = false): Record<st
   }
   
   return controls
-}
-
-const updateObjectsListFromCanvas = (objects: any[]) => {
-  if (isUpdatingObjectsList) {
-    return
-  }
-  
-  if (!objects || !Array.isArray(objects)) {
-    isUpdatingObjectsList = true
-    allObjectsList.value = []
-    nextTick(() => {
-      isUpdatingObjectsList = false
-    })
-    return
-  }
-  
-  isUpdatingObjectsList = true
-  
-  try {
-    allObjectsList.value = objects
-      .filter(obj => !obj.userData?.isWorkZoneIndicator)
-      .map((obj, index) => {
-        const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-        const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-        
-        const controls = calculateControlCoordinates(obj, true)
-        
-        let centerX = 0
-        let centerY = 0
-        
-        if (controls.tl && controls.tr && controls.bl && controls.br) {
-          const x1 = controls.tl.x, y1 = controls.tl.y
-          const x2 = controls.br.x, y2 = controls.br.y
-          const x3 = controls.tr.x, y3 = controls.tr.y
-          const x4 = controls.bl.x, y4 = controls.bl.y
-          
-          const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-          if (Math.abs(denom) > 0.001) {
-            const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-            centerX = x1 + t * (x2 - x1)
-            centerY = y1 + t * (y2 - y1)
-          } else {
-            centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
-            centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
-          }
-        } else {
-          const originX = obj.originX || 'left'
-          const originY = obj.originY || 'top'
-          const objLeft = obj.left || 0
-          const objTop = obj.top || 0
-          
-          let actualLeft = objLeft
-          let actualTop = objTop
-          
-          if (originX === 'center') {
-            actualLeft = objLeft - objWidth / 2
-          } else if (originX === 'right') {
-            actualLeft = objLeft - objWidth
-          }
-          
-          if (originY === 'center') {
-            actualTop = objTop - objHeight / 2
-          } else if (originY === 'bottom') {
-            actualTop = objTop - objHeight
-          }
-          
-          centerX = actualLeft + objWidth / 2
-          centerY = actualTop + objHeight / 2
-        }
-        
-        return {
-          id: obj.id || `obj-${index}`,
-          type: obj.type || 'unknown',
-          left: obj.left || 0,
-          top: obj.top || 0,
-          width: objWidth,
-          height: objHeight,
-          opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
-          controls: controls,
-          centerX: centerX,
-          centerY: centerY
-        }
-      })
-  } finally {
-    nextTick(() => {
-      isUpdatingObjectsList = false
-    })
-  }
-}
-
-const rotateModel = (angleDegrees) => {
-  if (!currentMesh) return
-  
-  const angleRadians = THREE.MathUtils.degToRad(angleDegrees)
-  
-  console.log('🔄 Rotation 3D - Angle:', angleDegrees, '° (', angleRadians, 'rad)')
-  
-  const euler = new THREE.Euler(0, angleRadians, 0, 'XYZ')
-  currentMesh.setRotationFromEuler(euler)
-  
-}
-
-const updateTextureDirect = (immediate = false) => {
-  if (!canvasTexture) return
-  
-  canvasTexture.needsUpdate = true
-  
-  if (immediate && renderer && scene && camera) {
-    renderer.render(scene, camera)
-  }
-}
-
-const setRotationHandleHover = (isHovering: boolean) => {
-  coordinatesDisplay.value.isOnRotationHandle = isHovering
-}
-
-const setDetectedControl = (handleInfo: any, distance: number | null = null, x: number | null = null, y: number | null = null) => {
-  if (!handleInfo) {
-    detectedControl.value = {
-      show: false,
-      handle: null,
-      corner: null,
-      edge: null,
-      isRotation: false,
-      distance: null,
-      x: null,
-      y: null
-    }
-    return
-  }
-
-  detectedControl.value = {
-    show: true,
-    handle: handleInfo.handle || null,
-    corner: handleInfo.corner || null,
-    edge: handleInfo.edge || null,
-    isRotation: handleInfo.isRotation || false,
-    distance: distance,
-    x: x,
-    y: y
-  }
 }
 
 const patchMaterialForDecal = (material: any) => {
@@ -1524,44 +1181,15 @@ const endDecalRotation = () => {
   shaderUniforms.uDecalMap.value = null
 }
 
-const disableOrbitControls = () => {
-  if (controls) {
-    controls.enabled = false
-    controls.enableRotate = false
-    console.log('🔒 OrbitControls désactivés')
-  }
-}
 
-const enableOrbitControls = () => {
-  if (controls) {
-    controls.enabled = true
-    controls.enableRotate = true
-    console.log('🔓 OrbitControls réactivés')
-  }
-}
+
+
 
 defineExpose({
   startDecalRotation,
   updateDecalRotation,
   endDecalRotation,
-  disableOrbitControls,
-  enableOrbitControls,
-  applyTexture,
-  setupSharedCanvasTexture: (canvas: HTMLCanvasElement) => {
-    if (canvas && currentMesh) {
-      setupSharedCanvasTexture(canvas)
-    }
-  },
-  updateTextureDirect,
-  setPlacementMode,
   updateSelectedObjectCoords,
-  updateObjectsListFromCanvas,
-  setDragMode,
-  setDragState,
-  setResizing,
-  rotateModel,
-  setRotationHandleHover,
-  setDetectedControl,
   renderer: () => renderer
 })
 </script>

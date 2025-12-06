@@ -489,14 +489,14 @@ export function useDesignStudio() {
   // EVENT HANDLERS - SCALE
   // ============================================
 
-  const on3DScale = (scaleData) => {
-    if (!dragMode.value) return
+//   const on3DScale = (scaleData) => {
+//     if (!dragMode.value) return
     
-    const canvas = fabricDesignerRef.value?.getCanvas()
-    if (!canvas?.getActiveObject()) return
+//     const canvas = fabricDesignerRef.value?.getCanvas()
+//     if (!canvas?.getActiveObject()) return
     
-    fabricDesignerRef.value?.scaleSelectedObject?.(scaleData.scaleFactor)
-  }
+//     fabricDesignerRef.value?.scaleSelectedObject?.(scaleData.scaleFactor)
+//   }
 
   // ============================================
   // UTILITY FUNCTIONS
@@ -547,7 +547,6 @@ export function useDesignStudio() {
     on3DDrag,
     on3DDragStart,
     on3DDragEnd,
-    on3DScale,
     on3DResizeStart,
     on3DResize,
     on3DResizeEnd,

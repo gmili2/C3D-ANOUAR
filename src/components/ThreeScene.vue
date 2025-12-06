@@ -649,7 +649,6 @@ const onMouseUp = (event: MouseEvent) => {
   canvas.addEventListener('mousemove', onMouseMove)
   canvas.addEventListener('mouseup', onMouseUp)
   canvas.addEventListener('click', onCanvasClick)
-  canvas.addEventListener('wheel', onMouseWheel, { passive: false })
 }
 
 function normalizeModel(obj, targetSize = 8.5) {

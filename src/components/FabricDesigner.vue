@@ -1,20 +1,7 @@
-<!-- 
-  FabricDesigner.vue - Composant pour le design 2D avec Fabric.js
-  
-  Ce composant gère :
-  - Le canvas 2D Fabric.js pour créer des designs
-  - L'ajout d'éléments (texte, images, formes)
-  - Le dessin libre avec le pinceau
-  - L'historique undo/redo
-  - La synchronisation avec le modèle 3D via texture partagée
-  - Les zones de travail (exclusion de zones haut/bas)
-  - Le placement d'éléments depuis le modèle 3D
--->
+
 <template>
   <div class="fabric-designer-container">
-    <!-- Barre d'outils avec tous les boutons d'action -->
     <div class="designer-toolbar">
-      <!-- Bouton pour ajouter du texte -->
       <button 
         @click="activatePlacementMode('text')" 
         class="toolbar-btn"
@@ -22,199 +9,28 @@
         Ajouter du texte
       </button>
       <button 
-        @click="activatePlacementMode('image')" 
-        class="toolbar-btn"
-      >
-        Ajouter une image
-      </button>
-      <button 
         @click="activatePlacementMode('circle')" 
         class="toolbar-btn"
       >
         Cercle
       </button>
-      <button 
-        @click="activatePlacementMode('rectangle')" 
-        class="toolbar-btn"
-      >
-        Rectangle
-      </button>
-      <button @click="toggleDrawMode" class="toolbar-btn">
-        {{ isDrawMode ? 'Mode objet' : 'Mode dessin' }}
-      </button>
-      <button @click="deleteSelected" class="toolbar-btn" :disabled="!hasSelection" title="Supprimer l'élément sélectionné (Suppr)">
-        🗑️ Supprimer
-      </button>
-      <div class="toolbar-separator"></div>
-      <button @click="undo" class="toolbar-btn" :disabled="!canUndo" title="Annuler (Ctrl+Z)">
-        ↶ Retour
-      </button>
-      <button @click="redo" class="toolbar-btn" :disabled="!canRedo" title="Refaire (Ctrl+Y)">
-        ↷ Suivant
-      </button>
-      <div class="toolbar-separator"></div>
-      <label class="toolbar-btn">
-        Couleur:
-        <input type="color" v-model="drawColor" @change="updateBrushAndSelection" />
-      </label>
-      <button @click="applyColorToSelection" class="toolbar-btn" :disabled="!hasSelection">
-        🎨 Appliquer couleur
-      </button>
-      <div class="toolbar-separator"></div>
-      <label class="toolbar-btn">
-        Angle (°):
-        <input 
-          type="number" 
-          v-model.number="rotationAngle" 
-          min="-360" 
-          max="360" 
-          step="1"
-          class="rotation-input"
-          placeholder="0"
-        />
-      </label>
-      <button @click="applyRotation" class="toolbar-btn" :disabled="!hasSelection">
-        🔄 Appliquer rotation
-      </button>
-      <div class="toolbar-separator"></div>
-      <label class="toolbar-btn">
-        Largeur:
-        <input type="range" v-model.number="drawWidth" min="1" max="20" @input="updateBrush" />
-        {{ drawWidth }}px
-      </label>
-      <button @click="clearCanvas" class="toolbar-btn">Effacer</button>
-      <button @click="exportDesign" class="toolbar-btn export-btn">Exporter</button>
     </div>
     <div class="fabric-canvas-wrapper">
       <canvas ref="canvasElement" class="fabric-canvas"></canvas>
       <!-- Div de débogage pour afficher les coordonnées des contrôles -->
-      <div v-if="detectedControl2D.show" class="debug-control-2d">
-        <div class="coord-title">🔧 Contrôle Détecté (2D)</div>
-        <div class="coord-content">
-          <div class="coord-section">
-            <div class="coord-label">Handle:</div>
-            <div class="coord-value">{{ detectedControl2D.handle || 'Aucun' }}</div>
-          </div>
-          <div v-if="detectedControl2D.corner" class="coord-section">
-            <div class="coord-label">Coin:</div>
-            <div class="coord-value">{{ detectedControl2D.corner }}</div>
-          </div>
-          <div v-if="detectedControl2D.edge" class="coord-section">
-            <div class="coord-label">Bord:</div>
-            <div class="coord-value">{{ detectedControl2D.edge }}</div>
-          </div>
-          <div v-if="detectedControl2D.isRotation" class="coord-section">
-            <div class="coord-label">Type:</div>
-            <div class="coord-value">Rotation (mtr)</div>
-          </div>
-          <div v-if="detectedControl2D.distance !== null" class="coord-section">
-            <div class="coord-label">Distance:</div>
-            <div class="coord-value">{{ detectedControl2D.distance.toFixed(1) }}px</div>
-          </div>
-          <div v-if="detectedControl2D.x !== null && detectedControl2D.y !== null" class="coord-section">
-            <div class="coord-label">Coordonnées:</div>
-            <div class="coord-value">
-              X: {{ detectedControl2D.x.toFixed(1) }}, 
-              Y: {{ detectedControl2D.y.toFixed(1) }}
-            </div>
-          </div>
-        </div>
-      </div>
+   
       <!-- Div de débogage pour afficher les coordonnées du curseur -->
-      <div class="cursor-coords-2d">
-        <div class="coord-title">🖱️ Curseur (2D)</div>
-        <div class="coord-content">
-          <div class="coord-section">
-            <div class="coord-label">X:</div>
-            <div class="coord-value">{{ cursorCoords2D.x !== null ? cursorCoords2D.x.toFixed(1) : '--' }}</div>
-          </div>
-          <div class="coord-section">
-            <div class="coord-label">Y:</div>
-            <div class="coord-value">{{ cursorCoords2D.y !== null ? cursorCoords2D.y.toFixed(1) : '--' }}</div>
-          </div>
-        </div>
-      </div>
-      <!-- Liste de tous les éléments avec leurs contrôles -->
-      <!-- <div v-if="allObjectsList2D.length > 0" class="objects-list-2d">
-        <div class="coord-title">📋 Éléments du Canvas ({{ allObjectsList2D.length }})</div>
-        <div class="objects-scroll-container">
-          <div 
-            v-for="(obj, index) in allObjectsList2D" 
-            :key="index"
-            class="object-item"
-            :class="{ 'selected': obj.isSelected }"
-          >
-            <div class="object-header">
-              <span class="object-type">{{ obj.type }}</span>
-              <span v-if="obj.isSelected" class="selected-badge">✓</span>
-            </div>
-            <div class="object-details">
-              <div class="object-detail-row">
-                <span>X:</span> {{ obj.left.toFixed(1) }}, 
-                <span>Y:</span> {{ obj.top.toFixed(1) }}
-              </div>
-              <div class="object-detail-row">
-                <span>W:</span> {{ obj.width.toFixed(1) }}, 
-                <span>H:</span> {{ obj.height.toFixed(1) }}
-              </div>
-              <div class="object-detail-row center-coords">
-                <span>Centre:</span> ({{ obj.centerX.toFixed(1) }}, {{ obj.centerY.toFixed(1) }})
-              </div>
-              <div class="object-detail-row">
-                <span>Opacité:</span> {{ (obj.opacity !== undefined ? obj.opacity : 1.0).toFixed(2) }}
-              </div>
-              <div v-if="obj.controls && Object.keys(obj.controls).length > 0" class="controls-section">
-                <div class="controls-title">Contrôles:</div>
-                <div v-if="obj.controls.tl" class="control-item">
-                  <span>tl:</span> ({{ obj.controls.tl.x.toFixed(1) }}, {{ obj.controls.tl.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.tr" class="control-item">
-                  <span>tr:</span> ({{ obj.controls.tr.x.toFixed(1) }}, {{ obj.controls.tr.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.bl" class="control-item">
-                  <span>bl:</span> ({{ obj.controls.bl.x.toFixed(1) }}, {{ obj.controls.bl.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.br" class="control-item">
-                  <span>br:</span> ({{ obj.controls.br.x.toFixed(1) }}, {{ obj.controls.br.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.mt" class="control-item">
-                  <span>mt:</span> ({{ obj.controls.mt.x.toFixed(1) }}, {{ obj.controls.mt.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.mb" class="control-item">
-                  <span>mb:</span> ({{ obj.controls.mb.x.toFixed(1) }}, {{ obj.controls.mb.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.ml" class="control-item">
-                  <span>ml:</span> ({{ obj.controls.ml.x.toFixed(1) }}, {{ obj.controls.ml.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.mr" class="control-item">
-                  <span>mr:</span> ({{ obj.controls.mr.x.toFixed(1) }}, {{ obj.controls.mr.y.toFixed(1) }})
-                </div>
-                <div v-if="obj.controls.mtr" class="control-item">
-                  <span>mtr:</span> ({{ obj.controls.mtr.x.toFixed(1) }}, {{ obj.controls.mtr.y.toFixed(1) }})
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div> -->
+    
     </div>
   </div>
 </template>
 
 <script setup>
-/**
- * SCRIPT SETUP - Configuration du composant Fabric.js
- * 
- * Ce composant gère un canvas 2D interactif avec Fabric.js pour créer
- * des designs qui seront appliqués comme texture sur le modèle 3D.
- */
 
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern, ActiveSelection } from 'fabric'
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
-import { log } from 'three'
 
-// ===== ÉVÉNEMENTS ÉMIS =====
 const emit = defineEmits([
   'design-updated',          // Le design a été modifié
   'canvas-ready',            // Le canvas est prêt
@@ -228,8 +44,6 @@ const emit = defineEmits([
 
 // ===== PROPS =====
 const props = defineProps({
-  // Méthode pour mise à jour directe de la texture (bypass du store réactif)
-  // Utilisée pour les événements fréquents (object:moving, object:scaling)
   updateTextureDirect: {
     type: Function,
     default: null
@@ -286,9 +100,7 @@ const detectedControl2D = ref({
   y: null
 })
 
-// ===== LISTE DE TOUS LES OBJETS 2D =====
-const allObjectsList2D = ref([])
-let isUpdatingObjectsList2D = false
+
 
 // ===== COORDONNÉES DU CURSEUR 2D =====
 const cursorCoords2D = ref({
@@ -1343,7 +1155,7 @@ const initCanvas = () => {
     // Mettre à jour la liste quand un objet est sélectionné
     canvas.on('selection:created', (e) => {
       // alert('selection:created')
-      // updateObjectsList2D()
+
       // updateHasSelection() // Mettre à jour hasSelection
       const activeObject = e.selected?.[0] || canvas.getActiveObject()
       if (activeObject && !activeObject.userData?.isWorkZoneIndicator) {
@@ -1480,8 +1292,7 @@ const initCanvas = () => {
         canvas.userData.multiSelectedObjects = []
       }
       emit('object-deselected')
-      // Mettre à jour la liste des objets 2D
-      updateObjectsList2D()
+
     })
     
     // Écouter tous les événements de modification et sauvegarder l'historique
@@ -1494,12 +1305,10 @@ const initCanvas = () => {
       signalChange()
       // Notifier le parent pour mettre à jour la liste des objets
       emit('objects-changed')
-      // Mettre à jour la liste des objets 2D
-      updateObjectsList2D()
+
     })
     canvas.on('object:modified', (e) => {
-      // Mettre à jour la liste des objets 2D après modification
-      updateObjectsList2D()
+
       // Ne pas sauvegarder pendant la modification, seulement après
       const obj = e.target
       
@@ -1522,8 +1331,7 @@ const initCanvas = () => {
       }
     })
     canvas.on('object:removed', (e) => {
-      // Mettre à jour la liste des objets 2D après suppression
-      updateObjectsList2D()
+
       const obj = e.target
       // Supprimer les copies wrap-around si l'objet original est supprimé
       if (obj && !obj.userData?.isWrapAroundCopy) {
@@ -1648,8 +1456,7 @@ const initCanvas = () => {
     })
     // Événement après le redimensionnement (scaling terminé)
     canvas.on('object:scaled', (e) => {
-      // Mettre à jour la liste des objets 2D après redimensionnement
-      updateObjectsList2D()
+
       const obj = e.target
       
       // Synchroniser les copies wrap-around si l'objet redimensionné est un original
@@ -1687,8 +1494,7 @@ const initCanvas = () => {
         rotationAngle.value = obj.angle || 0
       }
       
-      // Mettre à jour la liste des objets 2D après rotation
-      updateObjectsList2D()
+
       
       // Synchroniser les copies wrap-around si l'objet roté est un original
       if (obj && !obj.userData?.isWorkZoneIndicator && !obj.userData?.isWrapAroundCopy) {
@@ -2229,8 +2035,7 @@ const applyRotation = () => {
     }
   }
   
-  // Mettre à jour la liste des objets 2D après rotation
-  updateObjectsList2D()
+
   
   // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
   if (!activeObject.userData?.isWorkZoneIndicator) {
@@ -2522,9 +2327,6 @@ const placeElementAt = (type, x, y) => {
       break
     case 'text':
       placeTextAt(x, adjustedY)
-      break
-    case 'image':
-      placeImageAt(x, adjustedY)
       break
     default:
   }
@@ -3177,101 +2979,7 @@ const calculateControlCoordinates2D = (obj) => {
 /**
  * Met à jour la liste de tous les objets du canvas avec leurs contrôles
  */
-const updateObjectsList2D = () => {
-  // Éviter les mises à jour récursives
-  if (isUpdatingObjectsList2D || !canvas) {
-    return
-  }
-  
-  isUpdatingObjectsList2D = true
-  
-  try {
-    const objects = canvas.getObjects().filter(obj => !obj.userData?.isWorkZoneIndicator)
-    const activeObject = canvas.getActiveObject()
-    
-    allObjectsList2D.value = objects.map((obj, index) => {
-      const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
-      const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-      
-      // Vérifier si cet objet est sélectionné
-      const isSelected = activeObject && (
-        (obj.id && activeObject.id && obj.id === activeObject.id) ||
-        obj === activeObject
-      )
-      
-      // Calculer les coordonnées des contrôles
-      const controls = calculateControlCoordinates2D(obj)
-      
-      // Calculer le centre géométrique réel de l'élément
-      // Le centre est l'intersection des diagonales, ce qui reste fixe même après rotation
-      let centerX = 0
-      let centerY = 0
-      
-      if (controls.tl && controls.tr && controls.bl && controls.br) {
-        // Calculer l'intersection des deux diagonales (tl->br et tr->bl)
-        // Cela donne toujours le centre géométrique réel, même après rotation
-        const x1 = controls.tl.x, y1 = controls.tl.y  // Point 1 de la première diagonale
-        const x2 = controls.br.x, y2 = controls.br.y  // Point 2 de la première diagonale
-        const x3 = controls.tr.x, y3 = controls.tr.y  // Point 1 de la deuxième diagonale
-        const x4 = controls.bl.x, y4 = controls.bl.y  // Point 2 de la deuxième diagonale
-        
-        // Formule d'intersection de deux segments de ligne
-        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if (Math.abs(denom) > 0.001) {
-          const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-          centerX = x1 + t * (x2 - x1)
-          centerY = y1 + t * (y2 - y1)
-        } else {
-          // Fallback : moyenne des 4 coins si les diagonales sont parallèles
-          centerX = (controls.tl.x + controls.tr.x + controls.bl.x + controls.br.x) / 4
-          centerY = (controls.tl.y + controls.tr.y + controls.bl.y + controls.br.y) / 4
-        }
-      } else {
-        // Fallback : utiliser left/top + width/height si les contrôles ne sont pas disponibles
-        const originX = obj.originX || 'left'
-        const originY = obj.originY || 'top'
-        const objLeft = obj.left || 0
-        const objTop = obj.top || 0
-        
-        let actualLeft = objLeft
-        let actualTop = objTop
-        
-        if (originX === 'center') {
-          actualLeft = objLeft - objWidth / 2
-        } else if (originX === 'right') {
-          actualLeft = objLeft - objWidth
-        }
-        
-        if (originY === 'center') {
-          actualTop = objTop - objHeight / 2
-        } else if (originY === 'bottom') {
-          actualTop = objTop - objHeight
-        }
-        
-        centerX = actualLeft + objWidth / 2
-        centerY = actualTop + objHeight / 2
-      }
-      
-      return {
-        id: obj.id || `obj-${index}`,
-        type: obj.type || 'unknown',
-        left: obj.left || 0,
-        top: obj.top || 0,
-        width: objWidth,
-        height: objHeight,
-        opacity: obj.opacity !== undefined ? obj.opacity : 1.0,
-        isSelected: isSelected,
-        controls: controls,
-        centerX: centerX,
-        centerY: centerY
-      }
-    })
-  } finally {
-    nextTick(() => {
-      isUpdatingObjectsList2D = false
-    })
-  }
-}
+
 
 /**
  * Sélectionne un objet à une position donnée sur le canvas
@@ -4213,139 +3921,6 @@ defineExpose({
   color: #fff;
 }
 
-/* Style pour la liste des objets 2D */
-.objects-list-2d {
-  position: fixed;
-  top: 130px;
-  left: 717px;
-  background: rgba(34, 197, 94, 0.95);
-  border: 2px solid #22c55e;
-  color: #fff;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  z-index: 1000;
-  min-width: 280px;
-  max-width: 350px;
-  max-height: 500px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-}
 
-.objects-list-2d .coord-title {
-  color: #fff;
-  font-weight: bold;
-  margin-bottom: 8px;
-  font-size: 13px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-  padding-bottom: 6px;
-}
-
-.objects-list-2d .objects-scroll-container {
-  flex: 1;
-  overflow-y: auto;
-  margin-top: 8px;
-  padding-right: 4px;
-}
-
-.objects-list-2d .objects-scroll-container::-webkit-scrollbar {
-  width: 6px;
-}
-
-.objects-list-2d .objects-scroll-container::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-.objects-list-2d .objects-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 3px;
-}
-
-.objects-list-2d .objects-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.objects-list-2d .object-item {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 8px;
-  margin-bottom: 6px;
-  border-left: 3px solid transparent;
-  transition: all 0.2s;
-}
-
-.objects-list-2d .object-item.selected {
-  background: rgba(255, 255, 255, 0.25);
-  border-left-color: #fff;
-}
-
-.objects-list-2d .object-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.objects-list-2d .object-type {
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.objects-list-2d .selected-badge {
-  background: #fff;
-  color: #22c55e;
-  border-radius: 50%;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: bold;
-}
-
-.objects-list-2d .object-details {
-  font-size: 11px;
-  opacity: 0.9;
-}
-
-.objects-list-2d .object-detail-row {
-  margin: 2px 0;
-}
-
-.objects-list-2d .object-detail-row span {
-  font-weight: 600;
-  margin-right: 4px;
-}
-
-.objects-list-2d .controls-section {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.objects-list-2d .controls-title {
-  font-weight: 600;
-  font-size: 10px;
-  margin-bottom: 4px;
-  opacity: 0.8;
-}
-
-.objects-list-2d .control-item {
-  font-size: 10px;
-  margin: 2px 0;
-  opacity: 0.85;
-}
-
-.objects-list-2d .control-item span {
-  font-weight: 600;
-  margin-right: 4px;
-}
 </style>
 

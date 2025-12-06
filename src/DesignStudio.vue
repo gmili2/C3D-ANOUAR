@@ -34,8 +34,6 @@
       <div class="view-panel view-2d">
         <FabricDesigner
           ref="fabricDesignerRef"
-          :canvas-width="500"
-          :canvas-height="500"
           :update-texture-direct="() => threeSceneRef?.updateTextureDirect?.()"
           @canvas-ready="onFabricCanvasReady"
           @placement-mode-changed="onPlacementModeChanged"

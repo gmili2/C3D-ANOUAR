@@ -74,22 +74,15 @@ let currentMesh: THREE.Object3D | null = null
 const loadedMeshes = shallowRef<THREE.Object3D[]>([])
 const innerMesh = shallowRef<THREE.Mesh | null>(null)
 const outerMesh = shallowRef<THREE.Mesh | null>(null)
-
 const { innerShaderMaterial, outerShaderMaterial } = useShaderMaterial()
-
 const orbitControlsEnabled = ref(false)
-
-
 let canvasTexture: THREE.CanvasTexture | null = null
-
 const tresCanvasRef = ref<any>(null)
 const textureUpdaterRef = ref<any>(null)
-
 let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
 let renderer: THREE.WebGLRenderer | null = null
 let controls: ThreeOrbitControls | null = null
-
 let shaderUniforms = {
   uDecalMap: { value: null as THREE.Texture | null },
   uDecalVisible: { value: 0 },
@@ -97,7 +90,6 @@ let shaderUniforms = {
   uDecalScale: { value: new THREE.Vector2(1, 1) },
   uDecalAngle: { value: 0 }
 }
-
 const coordinatesDisplay = ref({
   show: false,
   uvU: 0,
@@ -108,7 +100,6 @@ const coordinatesDisplay = ref({
   isOnSeam: false,
   isOnRotationHandle: false
 })
-
 const selectedObjectCoords = ref({
   show: false,
   type: '',
@@ -124,22 +115,26 @@ const selectedObjectCoords = ref({
   originX: 'left',
   originY: 'top'
 })
-
 const isNearRotationHandle = ref(false)
-
-
 let isUpdatingSelectedObject = false
-
-
-
+let raycaster3D: THREE.Raycaster | null = null
+let mouse: THREE.Vector2 | null = null
+let isDragging3D = false
+let isResizing3D = false
+let resizeStartPosition: { x: number; y: number } | null = null
+let resizeHandleInfo: any = null
+let isRotating3D = false
+let rotationStartPosition: { x: number; y: number } | null = null
+let rotationStartCursor: { x: number; y: number } | null = null
+let rotationCenter: { x: number; y: number } | null = null
+let rotationJustEnded = false
+let rotationEndTime = 0
 
 watch(() => props.canvas2D, (newCanvas) => {
   if (newCanvas && currentMesh) {
     setupSharedCanvasTexture(newCanvas)
   }
 }, { deep: true })
-
-
 
 watch(() => props.texture, (newTexture) => {
   if (currentMesh && newTexture) {
@@ -222,20 +217,6 @@ const initSceneAfterTresReady = () => {
     }
   })
 }
-
-let raycaster3D: THREE.Raycaster | null = null
-let mouse: THREE.Vector2 | null = null
-let isDragging3D = false
-let isResizing3D = false
-let resizeStartPosition: { x: number; y: number } | null = null
-let resizeHandleInfo: any = null
-
-let isRotating3D = false
-let rotationStartPosition: { x: number; y: number } | null = null
-let rotationStartCursor: { x: number; y: number } | null = null
-let rotationCenter: { x: number; y: number } | null = null
-let rotationJustEnded = false
-let rotationEndTime = 0
 
 const setupClickHandler = () => {
   if (!renderer || !renderer.domElement) {
@@ -917,8 +898,6 @@ const applyTexture = (texture: THREE.Texture | null) => {
   
 }
 
-
-
 const updateSelectedObjectCoords = (obj: any) => {
   if (isUpdatingSelectedObject) {
     return
@@ -1153,8 +1132,12 @@ const startDecalRotation = async (objectProps: any, dataUrl: string) => {
     const centerU = centerX / canvasWidth
     const centerV = 1 - (centerY / canvasHeight)
     
-    const scaleU = objectProps.width / canvasWidth
-    const scaleV = objectProps.height / canvasHeight
+    const multiplier = objectProps.multiplier || 1
+    const realWidth = texture.image.width / multiplier
+    const realHeight = texture.image.height / multiplier
+    
+    const scaleU = realWidth / canvasWidth
+    const scaleV = realHeight / canvasHeight
     
     shaderUniforms.uDecalMap.value = texture
     shaderUniforms.uDecalCenter.value.set(centerU, centerV)
@@ -1175,10 +1158,6 @@ const endDecalRotation = () => {
   shaderUniforms.uDecalVisible.value = 0
   shaderUniforms.uDecalMap.value = null
 }
-
-
-
-
 
 defineExpose({
   startDecalRotation,

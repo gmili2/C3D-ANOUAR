@@ -37,26 +37,10 @@ const props = defineProps({
     type: Function,
     default: null
   },
-  canvasWidth: {
-    type: Number,
-    default: 800
-  },
-  canvasHeight: {
-    type: Number,
-    default: 600
-  },
   on3DClick: {
     type: Function,
     default: null
   },
-  workZoneTop: {
-    type: Number,
-    default: 0.1
-  },
-  workZoneBottom: {
-    type: Number,
-    default: 0.1
-  }
 })
 
 const canvasElement = ref(null)
@@ -71,8 +55,8 @@ const drawWidth = ref(5)
 const placementMode = ref(null)
 const rotationAngle = ref(0)
 
-const canvasWidth = props.canvasWidth || 800
-const canvasHeight = props.canvasHeight || 600
+const canvasWidth =  800
+const canvasHeight = 500
 
 const { requestTextureUpdate, requestTextureUpdateImmediate } = useCanvasTextureStore()
 
@@ -109,23 +93,10 @@ onUnmounted(() => {
     canvas.dispose()
     canvas = null
   }
-  if (window._fabricKeyboardHandler) {
-    window.removeEventListener('keydown', window._fabricKeyboardHandler)
-    delete window._fabricKeyboardHandler
-  }
+
 })
 
-watch(() => drawColor.value, () => {
-  updateBrush()
-})
 
-watch(() => drawWidth.value, () => {
-  updateBrush()
-})
-
-watch([() => props.workZoneTop, () => props.workZoneBottom], () => {
-  if (canvas) drawWorkZoneIndicators()
-})
 
 const removeWrapAroundCopies = (obj) => {
   if (!canvas) return
@@ -151,8 +122,8 @@ const isCompletelyOutsideCanvas = (obj) => {
   const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
   const objLeft = obj.left || 0
   const objTop = obj.top || 0
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   if (objLeft > canvasWidth) return true
@@ -241,8 +212,8 @@ const syncCopyWithOriginal = (copy) => {
   } else if (wrapDirection === 'horizontal-left') {
     newOriginalLeft = copy.left - canvasWidth
   }
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   const zoneHeight = activeZoneBottom - activeZoneTop
@@ -348,8 +319,8 @@ const createWrapAroundCopies = async (obj) => {
   const objLeft = obj.left || 0
   const objTop = obj.top || 0
   const copies = []
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   if (objLeft + objWidth > canvasWidth) {
@@ -599,8 +570,8 @@ const syncAllCopiesWithOriginal = (original) => {
   const objLeft = original.left || 0
   const objTop = original.top || 0
   
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   const zoneHeight = activeZoneBottom - activeZoneTop
@@ -674,8 +645,8 @@ const applyWrapAround = async (obj) => {
   const objLeft = obj.left || 0
   const objTop = obj.top || 0
   
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   
@@ -841,12 +812,7 @@ const initCanvas = () => {
     // Forcer un rendu initial
     canvas.renderAll()
     
-    // Dessiner les indicateurs de zone de travail après un petit délai pour s'assurer que le canvas est prêt
-    nextTick(() => {
-      setTimeout(() => {
-        drawWorkZoneIndicators()
-      }, 100)
-    })
+
 
     // Fonction helper pour signaler les changements (événements critiques)
     const signalChange = () => {
@@ -1447,8 +1413,7 @@ const initCanvas = () => {
       })
     }
     
-    // Ajouter les raccourcis clavier
-    setupKeyboardShortcuts()
+
   } catch (error) {
     alert('Erreur lors de l\'initialisation du canvas: ' + error.message)
   }
@@ -1466,109 +1431,6 @@ const deselectObject = () => {
   requestTextureUpdate()
   emit('design-updated', canvas)
 }
-
-const deleteSelected = () => {
-  if (!canvas || !hasSelection.value) return
-  
-  const activeObject = canvas.getActiveObject()
-  if (activeObject) {
-    if (activeObject.type === 'activeSelection') {
-      // Si plusieurs objets sont sélectionnés
-      activeObject.getObjects().forEach(obj => canvas.remove(obj))
-    } else {
-      canvas.remove(activeObject)
-    }
-    canvas.discardActiveObject()
-    updateHasSelection() // Mettre à jour hasSelection
-    canvas.renderAll()
-    requestTextureUpdate()
-    emit('design-updated', canvas)
-
-  }
-}
-
-// Dessiner les indicateurs de zone de travail (zones exclues)
-const drawWorkZoneIndicators = () => {
-  if (!canvas) return
-  
-  try {
-    // Supprimer les anciens indicateurs s'ils existent
-    const existingIndicators = canvas.getObjects().filter(obj => obj.userData?.isWorkZoneIndicator)
-    existingIndicators.forEach(obj => canvas.remove(obj))
-    
-    const topHeight = canvasHeight * props.workZoneTop
-    const bottomHeight = canvasHeight * props.workZoneBottom
-    
-    // Zone exclue du haut (grisée)
-    if (topHeight > 0) {
-      const topZone = new Rect({
-        left: 0,
-        top: 0,
-        width: canvasWidth,
-        height: topHeight,
-        fill: 'rgba(200, 200, 200, 0.3)',
-        stroke: 'rgba(150, 150, 150, 0.5)',
-        strokeWidth: 2
-      })
-      // Configurer les propriétés après création
-      topZone.set({
-        selectable: false,
-        evented: false
-      })
-      topZone.userData = { isWorkZoneIndicator: true }
-      canvas.add(topZone)
-    }
-    
-    // Zone exclue du bas (grisée)
-    if (bottomHeight > 0) {
-      const bottomZone = new Rect({
-        left: 0,
-        top: canvasHeight - bottomHeight,
-        width: canvasWidth,
-        height: bottomHeight,
-        fill: 'rgba(200, 200, 200, 0.3)',
-        stroke: 'rgba(150, 150, 150, 0.5)',
-        strokeWidth: 2
-      })
-      // Configurer les propriétés après création
-      bottomZone.set({
-        selectable: false,
-        evented: false
-      })
-      bottomZone.userData = { isWorkZoneIndicator: true }
-      canvas.add(bottomZone)
-    }
-    
-    canvas.renderAll()
-  } catch (error) {
-  }
-}
-
-// Configuration des raccourcis clavier
-const setupKeyboardShortcuts = () => {
-  const handleKeyDown = (e) => {
-
-    // Suppr ou Delete pour supprimer
-    if ((e.key === 'Delete' || e.key === 'Backspace') && hasSelection.value) {
-      e.preventDefault()
-      deleteSelected()
-    }
-  }
-  
-  window.addEventListener('keydown', handleKeyDown)
-  
-  // Stocker le handler pour le cleanup
-  window._fabricKeyboardHandler = handleKeyDown
-}
-
-const updateBrush = () => {
-  if (canvas && canvas.freeDrawingBrush) {
-    canvas.freeDrawingBrush.width = drawWidth.value
-    canvas.freeDrawingBrush.color = drawColor.value
-  }
-}
-
-
 
 
 // Methods to get canvas data for texture
@@ -1620,8 +1482,8 @@ const activatePlacementMode = (type) => {
   }
   
   // Calculer le centre du canvas en tenant compte de la zone de travail
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   const activeZoneCenterY = activeZoneTop + (activeZoneBottom - activeZoneTop) / 2
@@ -1638,8 +1500,8 @@ const placeElementAt = (type, x, y) => {
   
   
   // Vérifier que la position est dans la zone active
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
+  const topHeight = 0
+  const bottomHeight = 0
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   
@@ -2737,18 +2599,17 @@ defineExpose({
   placeElementAt,
   activatePlacementMode,
   moveSelectedObject,
-  scaleSelectedObject,
+  // scaleSelectedObject,
   selectObjectAtPosition,
   findObjectAtPosition,
   detectResizeHandle,
   resizeSelectedObjectFromHandle,
   resetResizeData,
-  highlightResizeHandle,
-  resetResizeHover,
+  // highlightResizeHandle,
+  // resetResizeHover,
 
-  deleteSelected,
-  deselectObject,
-  activateRotationMode
+  // deselectObject,
+  // activateRotationMode
 })
 </script>
 

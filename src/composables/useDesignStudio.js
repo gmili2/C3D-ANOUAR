@@ -232,13 +232,14 @@ export function useDesignStudio() {
       activeObject.set('angle', 0)
       activeObject.setCoords()
       
-      const objWidth = activeObject.getScaledWidth()
-      const objHeight = activeObject.getScaledHeight()
+      const rect = activeObject.getBoundingRect()
+      const objWidth = rect.width
+      const objHeight = rect.height
       
       const dataUrl = activeObject.toDataURL({
         format: 'png',
         multiplier: 4,
-        enableRetinaScaling: true,
+        enableRetinaScaling: false,
         withoutBorders: true,
         withoutControls: true
       })
@@ -253,9 +254,8 @@ export function useDesignStudio() {
       threeSceneRef.value.startDecalRotation({
         left: center.x,
         top: center.y,
-        width: objWidth,
-        height: objHeight,
-        angle: -currentAngle
+        angle: -currentAngle,
+        multiplier: 4
       }, dataUrl)
       
       activeObject.set({ opacity: 0, hasControls: false, hasBorders: false })

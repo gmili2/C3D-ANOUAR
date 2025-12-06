@@ -2,25 +2,15 @@
 <template>
   <div class="fabric-designer-container">
     <div class="designer-toolbar">
-      <button 
-        @click="activatePlacementMode('text')" 
-        class="toolbar-btn"
-      >
+      <button @click="activatePlacementMode('text')" class="toolbar-btn">
         Ajouter du texte
       </button>
-      <button 
-        @click="activatePlacementMode('circle')" 
-        class="toolbar-btn"
-      >
+      <button @click="activatePlacementMode('circle')" class="toolbar-btn">
         Cercle
       </button>
     </div>
     <div class="fabric-canvas-wrapper">
       <canvas ref="canvasElement" class="fabric-canvas"></canvas>
-      <!-- Div de débogage pour afficher les coordonnées des contrôles -->
-   
-      <!-- Div de débogage pour afficher les coordonnées du curseur -->
-    
     </div>
   </div>
 </template>
@@ -32,17 +22,16 @@ import { Canvas, Rect, Circle, Textbox, Image as FabricImage, Pattern, ActiveSel
 import { useCanvasTextureStore } from '../composables/useCanvasTexture'
 
 const emit = defineEmits([
-  'design-updated',          // Le design a été modifié
-  'canvas-ready',            // Le canvas est prêt
-  'placement-mode-changed',  // Le mode placement a changé
-  'object-selected',         // Un objet a été sélectionné
-  'object-deselected',       // Aucun objet n'est sélectionné
-  'move-object',             // Un objet a été déplacé
-  'objects-changed',         // La liste des objets a changé (ajout/suppression)
-  'object-rotated'           // Un objet a été roté (pour appliquer la rotation au modèle 3D)
+  'design-updated',
+  'canvas-ready',
+  'placement-mode-changed',
+  'object-selected',
+  'object-deselected',
+  'move-object',
+  'objects-changed',
+  'object-rotated'
 ])
 
-// ===== PROPS =====
 const props = defineProps({
   updateTextureDirect: {
     type: Function,
@@ -50,80 +39,47 @@ const props = defineProps({
   },
   canvasWidth: {
     type: Number,
-    default: 800  // Largeur du canvas en pixels
+    default: 800
   },
   canvasHeight: {
     type: Number,
-    default: 600  // Hauteur du canvas en pixels
+    default: 600
   },
   on3DClick: {
     type: Function,
-    default: null  // Callback pour les clics 3D (déprécié)
+    default: null
   },
   workZoneTop: {
     type: Number,
-    default: 0.1  // 10% par défaut - Zone à exclure du haut
+    default: 0.1
   },
   workZoneBottom: {
     type: Number,
-    default: 0.1  // 10% par défaut - Zone à exclure du bas
+    default: 0.1
   }
 })
 
-// ===== RÉFÉRENCES =====
-const canvasElement = ref(null)      // Référence au canvas HTML
-const canvasContainer = ref(null)    // Référence au conteneur du canvas
-let canvas = null                    // Instance Fabric.js Canvas
-let renderTimeout = null             // Timeout pour debounce les rendus
+const canvasElement = ref(null)
+let canvas = null
+let renderTimeout = null
 
-// ===== GESTION DES COPIES POUR WRAP AROUND =====
-// Map pour stocker les copies wrap-around des objets
-// Clé: objet original, Valeur: tableau de copies
 const wrapAroundCopies = new Map()
 
-// ===== ÉTAT DU MODE DE DESSIN =====
-const isDrawMode = ref(false)    // Mode dessin libre actif
-const drawColor = ref('#000000')  // Couleur du pinceau
-const drawWidth = ref(5)          // Largeur du pinceau en pixels
-const placementMode = ref(null)   // Mode placement: null, 'circle', 'rectangle', 'text', 'image'
-const rotationAngle = ref(0)      // Angle de rotation en degrés
+const isDrawMode = ref(false)
+const drawColor = ref('#000000')
+const drawWidth = ref(5)
+const placementMode = ref(null)
+const rotationAngle = ref(0)
 
-// ===== DÉBOGAGE DES CONTRÔLES 2D =====
-const detectedControl2D = ref({
-  show: false,
-  handle: null,
-  corner: null,
-  edge: null,
-  isRotation: false,
-  distance: null,
-  x: null,
-  y: null
-})
-
-
-
-// ===== COORDONNÉES DU CURSEUR 2D =====
-const cursorCoords2D = ref({
-  x: null,
-  y: null
-})
-
-// ===== DIMENSIONS DU CANVAS =====
-// Dimensions réduites pour mieux correspondre au modèle 3D
 const canvasWidth = props.canvasWidth || 800
 const canvasHeight = props.canvasHeight || 600
 
-// ===== STORE POUR LA SYNCHRONISATION =====
-// Store pour signaler les mises à jour de texture à Three.js
-// requestTextureUpdate: throttled avec RAF (pour événements fréquents)
-// requestTextureUpdateImmediate: immédiat (pour événements critiques)
 const { requestTextureUpdate, requestTextureUpdateImmediate } = useCanvasTextureStore()
 
-// ===== SYSTÈME D'HISTORIQUE (UNDO/REDO) =====
-let history = []                    // Historique des états du canvas (JSON)
-let historyIndex = -1               // Index actuel dans l'historique
-const maxHistorySize = 50            // Taille maximale de l'historique
-let isUndoRedoInProgress = false    // Flag pour éviter de sauvegarder pendant undo/redo
+let history = []
+let historyIndex = -1
+const maxHistorySize = 50
+let isUndoRedoInProgress = false
 
 const canUndo = computed(() => {
   return canvas && historyIndex > 0
@@ -133,28 +89,22 @@ const canRedo = computed(() => {
   return canvas && historyIndex < history.length - 1
 })
 
-// Fonction pour sauvegarder l'historique
 const saveHistory = () => {
   if (!canvas || isUndoRedoInProgress) return
   const json = JSON.stringify(canvas.toJSON())
-  // Supprimer les éléments futurs si on est au milieu de l'historique
   if (historyIndex < history.length - 1) {
     history = history.slice(0, historyIndex + 1)
   }
   history.push(json)
   historyIndex = history.length - 1
-  
-  // Limiter la taille de l'historique
   if (history.length > maxHistorySize) {
     history.shift()
     historyIndex = history.length - 1
   }
 }
 
-// Vérifier si un objet est sélectionné (ref réactive pour la réactivité Vue)
 const hasSelection = ref(false)
 
-// Fonction pour mettre à jour hasSelection
 const updateHasSelection = () => {
   if (!canvas) {
     hasSelection.value = false
@@ -174,20 +124,16 @@ onUnmounted(() => {
     clearTimeout(renderTimeout)
     renderTimeout = null
   }
-  
-  // Nettoyer toutes les copies wrap-around
   if (wrapAroundCopies) {
     wrapAroundCopies.forEach((copies, obj) => {
       removeWrapAroundCopies(obj)
     })
     wrapAroundCopies.clear()
   }
-  
   if (canvas) {
     canvas.dispose()
     canvas = null
   }
-  // Nettoyer les raccourcis clavier
   if (window._fabricKeyboardHandler) {
     window.removeEventListener('keydown', window._fabricKeyboardHandler)
     delete window._fabricKeyboardHandler
@@ -202,123 +148,64 @@ watch(() => drawWidth.value, () => {
   updateBrush()
 })
 
-// Watch pour les zones de travail
 watch([() => props.workZoneTop, () => props.workZoneBottom], () => {
-  if (canvas) {
-    drawWorkZoneIndicators()
-  }
+  if (canvas) drawWorkZoneIndicators()
 })
 
-/**
- * Supprime les copies wrap-around d'un objet
- * 
- * @param {fabric.Object} obj - L'objet original (ou une copie)
- */
 const removeWrapAroundCopies = (obj) => {
   if (!canvas) return
-  
-  // Si c'est une copie, trouver l'original
   const original = obj.userData?.isWrapAroundCopy ? obj.userData.originalObject : obj
-  
   const copies = wrapAroundCopies.get(original)
   if (copies) {
-    // Retirer les copies de la liste des objets multi-sélectionnés avant de les supprimer
     if (canvas.userData?.multiSelectedObjects) {
       copies.forEach(copy => {
         const index = canvas.userData.multiSelectedObjects.indexOf(copy)
-        if (index > -1) {
-          canvas.userData.multiSelectedObjects.splice(index, 1)
-        }
+        if (index > -1) canvas.userData.multiSelectedObjects.splice(index, 1)
       })
-      // Retirer aussi l'original de la liste s'il n'a plus de copies
       const index = canvas.userData.multiSelectedObjects.indexOf(original)
-      if (index > -1) {
-        canvas.userData.multiSelectedObjects.splice(index, 1)
-      }
+      if (index > -1) canvas.userData.multiSelectedObjects.splice(index, 1)
     }
-    
-    // Supprimer les copies du canvas
-    copies.forEach(copy => {
-      canvas.remove(copy)
-    })
+    copies.forEach(copy => canvas.remove(copy))
     wrapAroundCopies.delete(original)
   }
 }
 
-/**
- * Vérifie si un objet est complètement hors du canvas
- * 
- * @param {fabric.Object} obj - L'objet à vérifier
- * @returns {boolean} - true si l'objet est complètement hors du canvas
- */
 const isCompletelyOutsideCanvas = (obj) => {
   if (!obj || !canvas) return false
-  
   const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
   const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
   const objLeft = obj.left || 0
   const objTop = obj.top || 0
-  
   const topHeight = canvasHeight * props.workZoneTop
   const bottomHeight = canvasHeight * props.workZoneBottom
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
-  
-  // Vérifier si l'objet est complètement à droite
   if (objLeft > canvasWidth) return true
-  // Vérifier si l'objet est complètement à gauche
   if (objLeft + objWidth < 0) return true
-  // Vérifier si l'objet est complètement en bas
   if (objTop > activeZoneBottom) return true
-  // Vérifier si l'objet est complètement en haut
   if (objTop + objHeight < activeZoneTop) return true
-  
   return false
 }
 
-/**
- * Remplace l'objet original par une copie et met à jour les références
- * 
- * @param {fabric.Object} original - L'objet original à remplacer
- * @param {fabric.Object} copy - La copie qui devient le nouvel original
- */
 const replaceOriginalWithCopy = (original, copy) => {
   if (!canvas || !original || !copy) return
-  
-  // Vérifier que la copie existe toujours dans le canvas
   const objects = canvas.getObjects()
-  if (!objects.includes(copy)) {
-    return
-  }
-  
-  // Supprimer toutes les autres copies (sauf celle qui devient l'original)
+  if (!objects.includes(copy)) return
   const copies = wrapAroundCopies.get(original)
   if (copies) {
     copies.forEach(c => {
-      if (c !== copy && objects.includes(c)) {
-        canvas.remove(c)
-      }
+      if (c !== copy && objects.includes(c)) canvas.remove(c)
     })
     wrapAroundCopies.delete(original)
   }
-  
-  // Supprimer l'original du canvas
-  if (objects.includes(original)) {
-    canvas.remove(original)
-  }
-  
-  // Transformer la copie en original
-  // Nettoyer complètement les userData pour éviter toute confusion
+  if (objects.includes(original)) canvas.remove(original)
   copy.set({
     selectable: true,
     evented: true,
     excludeFromExport: false
   })
-  
-  // Créer un nouvel userData propre sans références à l'ancien original
   const newUserData = {}
   if (copy.userData) {
-    // Copier les autres propriétés utiles mais supprimer les références wrap-around
     Object.keys(copy.userData).forEach(key => {
       if (key !== 'isWrapAroundCopy' && key !== 'originalObject' && key !== 'wrapDirection') {
         newUserData[key] = copy.userData[key]
@@ -326,55 +213,31 @@ const replaceOriginalWithCopy = (original, copy) => {
     })
   }
   copy.userData = newUserData
-  
-  // S'assurer que isWrapAroundCopy est bien false
   copy.userData.isWrapAroundCopy = false
   copy.userData.originalObject = null
-  
-  // Mettre à jour la Map pour supprimer toutes les références
   wrapAroundCopies.delete(original)
-  
-  // Nettoyer toutes les références dans d'autres copies qui pourraient pointer vers l'ancien original
   wrapAroundCopies.forEach((copiesList, orig) => {
     copiesList.forEach(c => {
       if (c.userData?.originalObject === original) {
-        // Cette copie pointait vers l'ancien original, nettoyer
         c.userData.originalObject = null
         c.userData.isWrapAroundCopy = false
-        // Supprimer cette copie aussi puisqu'elle n'a plus de sens
-        if (objects.includes(c)) {
-          canvas.remove(c)
-        }
+        if (objects.includes(c)) canvas.remove(c)
       }
     })
   })
-  
   canvas.renderAll()
   requestTextureUpdate()
   emit('design-updated', canvas)
 }
 
-/**
- * Synchronise une copie avec son original (lors du déplacement d'une copie)
- * 
- * @param {fabric.Object} copy - La copie déplacée
- */
 const syncCopyWithOriginal = (copy) => {
   if (!copy || !copy.userData?.isWrapAroundCopy || !copy.userData?.originalObject) return
-  
   const original = copy.userData.originalObject
   const wrapDirection = copy.userData.wrapDirection
-  
   if (!original || !canvas) return
-  
-  // Vérifier que l'original existe toujours dans le canvas
-  // Si l'original a été supprimé (remplacé par la copie), cette copie est maintenant le nouvel original
   const objects = canvas.getObjects()
   const originalExists = objects.includes(original)
-  
   if (!originalExists) {
-    // L'original a été supprimé, cette copie est maintenant le nouvel original
-    // Transformer cette copie en original
     copy.set({
       selectable: true,
       evented: true,
@@ -385,52 +248,36 @@ const syncCopyWithOriginal = (copy) => {
       isWrapAroundCopy: false,
       originalObject: null
     }
-    // Supprimer cette copie de la Map si elle y était
     wrapAroundCopies.forEach((copies, orig) => {
       const index = copies.indexOf(copy)
       if (index > -1) {
         copies.splice(index, 1)
-        if (copies.length === 0) {
-          wrapAroundCopies.delete(orig)
-        }
+        if (copies.length === 0) wrapAroundCopies.delete(orig)
       }
     })
     canvas.renderAll()
     requestTextureUpdate()
     return
   }
-  
-  // Calculer la nouvelle position de l'original basée sur la position de la copie
   let newOriginalLeft = copy.left
   let newOriginalTop = copy.top
-  
-  // Ajuster selon la direction du wrap
   if (wrapDirection === 'horizontal-right') {
-    // La copie est à gauche, donc l'original doit être à droite
     newOriginalLeft = copy.left + canvasWidth
   } else if (wrapDirection === 'horizontal-left') {
-    // La copie est à droite, donc l'original doit être à gauche
     newOriginalLeft = copy.left - canvasWidth
   }
-  
-  // Pour les directions verticales
   const topHeight = canvasHeight * props.workZoneTop
   const bottomHeight = canvasHeight * props.workZoneBottom
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
   const zoneHeight = activeZoneBottom - activeZoneTop
-  
   if (wrapDirection === 'vertical-bottom') {
     newOriginalTop = copy.top + zoneHeight
   } else if (wrapDirection === 'vertical-top') {
     newOriginalTop = copy.top - zoneHeight
   }
-  
-  // Empêcher la mise en boucle infinie en désactivant temporairement les événements
   const wasEvented = original.evented
   original.evented = false
-  
-  // Mettre à jour l'original avec TOUTES les propriétés de la copie (synchronisation complète)
   original.set({
     left: newOriginalLeft,
     top: newOriginalTop,
@@ -439,16 +286,13 @@ const syncCopyWithOriginal = (copy) => {
     angle: copy.angle || original.angle,
     flipX: copy.flipX || original.flipX,
     flipY: copy.flipY || original.flipY,
-    // Synchroniser les propriétés visuelles
     fill: copy.fill,
     stroke: copy.stroke,
     strokeWidth: copy.strokeWidth,
     opacity: copy.opacity,
     shadow: copy.shadow,
-    // Synchroniser les propriétés de transformation
     skewX: copy.skewX,
     skewY: copy.skewY,
-    // Synchroniser les propriétés spécifiques selon le type
     ...(original.type === 'rect' && {
       rx: copy.rx,
       ry: copy.ry
@@ -467,39 +311,22 @@ const syncCopyWithOriginal = (copy) => {
     })
   })
   original.setCoords()
-  
-  // Réactiver les événements
   original.evented = wasEvented
-  
-  // Forcer le rendu immédiat
   canvas.renderAll()
   requestTextureUpdate()
-  
-  // Vérifier si l'original est maintenant complètement hors du canvas
   if (isCompletelyOutsideCanvas(original)) {
-    // Remplacer l'original par la copie
     replaceOriginalWithCopy(original, copy)
   } else {
-    // Mettre à jour les autres copies si elles existent (sans recréer)
     syncAllCopiesWithOriginal(original)
   }
 }
 
-/**
- * Helper pour créer une copie d'un objet Fabric.js
- * 
- * @param {fabric.Object} obj - L'objet original
- * @returns {Promise<fabric.Object>} - La copie de l'objet
- */
 const cloneFabricObject = async (obj) => {
   if (!obj) return null
-  
   try {
-    // Dans Fabric.js v6, clone() peut retourner une Promise
     const cloned = await obj.clone()
     return cloned
   } catch (error) {
-    // Si clone() échoue ou n'est pas disponible, utiliser toObject/fromObject
     try {
       const objData = obj.toObject()
       const objClass = obj.constructor
@@ -511,101 +338,53 @@ const cloneFabricObject = async (obj) => {
   }
 }
 
-/**
- * Active les contrôles de redimensionnement pour un objet
- * @param {fabric.Object} obj - L'objet pour lequel activer les contrôles
- */
 const activateControlsForObject = (obj) => {
   if (obj && !obj.userData?.isWorkZoneIndicator) {
-    // Vérifier si l'objet est actuellement sélectionné
     const isSelected = canvas && canvas.getActiveObject() === obj
-    
-    // Activer les contrôles avec setControlsVisibility
-    // Activer tous les contrôles, y compris mt et mtr pour tous les objets
     obj.setControlsVisibility({
-      mt: true,  // ✅ Contrôle du milieu haut (activé pour tous)
-      mb: true, // Bottom (milieu bas)
-      ml: true, // Left (milieu gauche)
-      mr: true, // Right (milieu droite)
-      tl: true, // Top-left (coin haut-gauche)
-      tr: true, // Top-right (coin haut-droite)
-      bl: true, // Bottom-left (coin bas-gauche)
-      br: true, // Bottom-right (coin bas-droite)
-      mtr: true  // ✅ Contrôle de rotation (activé pour tous)
+      mt: true,
+      mb: true,
+      ml: true,
+      mr: true,
+      tl: true,
+      tr: true,
+      bl: true,
+      br: true,
+      mtr: true
     })
-    
-    // S'assurer que chaque contrôle individuel est visible
     if (obj.controls) {
       const controlNames = ['mt', 'mb', 'ml', 'mr', 'tl', 'tr', 'bl', 'br', 'mtr']
       controlNames.forEach(controlName => {
         if (obj.controls[controlName]) {
-          // Activer tous les contrôles, y compris mt et mtr
           obj.controls[controlName].visible = true
         }
       })
     }
-    
-    // Mettre à jour les coordonnées pour que les contrôles soient correctement positionnés
-    if (obj.setCoords) {
-      obj.setCoords()
-    }
-    
-    // Si l'objet est sélectionné, forcer un rendu pour afficher les contrôles
-    if (isSelected && canvas) {
-      canvas.renderAll()
-    }
-    
-    // Afficher les contrôles après activation avec leur état visible
-    if (obj.controls) {
-      const controlsState = {}
-      Object.keys(obj.controls).forEach(key => {
-        controlsState[key] = {
-          visible: obj.controls[key]?.visible,
-          actionName: obj.controls[key]?.actionName
-        }
-      })
-    }
+    if (obj.setCoords) obj.setCoords()
+    if (isSelected && canvas) canvas.renderAll()
   }
 }
 
-/**
- * Crée des copies wrap-around pour un objet qui dépasse les bords
- * 
- * Quand un objet dépasse un bord, une copie complète est créée de l'autre côté
- * pour montrer la partie qui dépasse. L'objet original reste à sa position.
- * 
- * @param {fabric.Object} obj - L'objet original
- */
 const createWrapAroundCopies = async (obj) => {
   if (!obj || !canvas || obj.userData?.isWorkZoneIndicator) return
-  
-  // Supprimer les anciennes copies
   removeWrapAroundCopies(obj)
-  
-  // Obtenir les dimensions de l'objet (avec le scale appliqué)
   const objWidth = (obj.width || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleX || 1)
   const objHeight = (obj.height || (obj.radius ? obj.radius * 2 : 50)) * (obj.scaleY || 1)
-  
   const objLeft = obj.left || 0
   const objTop = obj.top || 0
-  
   const copies = []
   const topHeight = canvasHeight * props.workZoneTop
   const bottomHeight = canvasHeight * props.workZoneBottom
   const activeZoneTop = topHeight
   const activeZoneBottom = canvasHeight - bottomHeight
-  
-  // ===== COPIES HORIZONTALES =====
-  // Si l'objet dépasse à droite, créer une copie complète à gauche
-  // La copie montre la partie qui dépasse
   if (objLeft + objWidth > canvasWidth) {
     const copy = await cloneFabricObject(obj)
     if (copy) {
       copy.set({
         left: objLeft - canvasWidth,
         top: objTop,
-        selectable: true,  // Permettre la sélection et le déplacement
-        evented: true,      // Permettre les événements
+        selectable: true,
+        evented: true,
         excludeFromExport: true
       })
       copy.userData = { 
@@ -614,30 +393,21 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'horizontal-right'
       }
       canvas.add(copy)
-      // Activer les contrôles de redimensionnement pour la copie
       activateControlsForObject(copy)
-      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
-        if (canvas.sendObjectToBack) {
-          canvas.sendObjectToBack(copy)
-        }
-      } catch (e) {
-        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
-      }
+        if (canvas.sendObjectToBack) canvas.sendObjectToBack(copy)
+      } catch (e) {}
       copies.push(copy)
     }
   }
-  
-  // Si l'objet dépasse à gauche, créer une copie complète à droite
-  // La copie montre la partie qui dépasse
   if (objLeft < 0) {
     const copy = await cloneFabricObject(obj)
     if (copy) {
       copy.set({
         left: objLeft + canvasWidth,
         top: objTop,
-        selectable: true,  // Permettre la sélection et le déplacement
-        evented: true,      // Permettre les événements
+        selectable: true,
+        evented: true,
         excludeFromExport: true
       })
       copy.userData = { 
@@ -646,30 +416,21 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'horizontal-left'
       }
       canvas.add(copy)
-      // Activer les contrôles de redimensionnement pour la copie
       activateControlsForObject(copy)
-      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
-        if (canvas.sendObjectToBack) {
-          canvas.sendObjectToBack(copy)
-        }
-      } catch (e) {
-        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
-      }
+        if (canvas.sendObjectToBack) canvas.sendObjectToBack(copy)
+      } catch (e) {}
       copies.push(copy)
     }
   }
-  
-  // ===== COPIES VERTICALES (avec zones de travail) =====
-  // Si l'objet dépasse en bas de la zone active, créer une copie en haut
   if (objTop + objHeight > activeZoneBottom) {
     const copy = await cloneFabricObject(obj)
     if (copy) {
       copy.set({
         left: objLeft,
         top: objTop - (activeZoneBottom - activeZoneTop),
-        selectable: true,  // Permettre la sélection et le déplacement
-        evented: true,      // Permettre les événements
+        selectable: true,
+        evented: true,
         excludeFromExport: true
       })
       copy.userData = { 
@@ -678,21 +439,13 @@ const createWrapAroundCopies = async (obj) => {
         wrapDirection: 'vertical-bottom'
       }
       canvas.add(copy)
-      // Activer les contrôles de redimensionnement pour la copie
       activateControlsForObject(copy)
-      // Envoyer la copie à l'arrière-plan pour ne pas gêner la sélection de l'original
       try {
-        if (canvas.sendObjectToBack) {
-          canvas.sendObjectToBack(copy)
-        }
-      } catch (e) {
-        // Si la méthode n'existe pas, ignorer (l'ordre d'ajout détermine le z-index)
-      }
+        if (canvas.sendObjectToBack) canvas.sendObjectToBack(copy)
+      } catch (e) {}
       copies.push(copy)
     }
   }
-  
-  // Si l'objet dépasse en haut de la zone active, créer une copie en bas
   if (objTop < activeZoneTop) {
     const copy = await cloneFabricObject(obj)
     if (copy) {
@@ -860,12 +613,6 @@ const createWrapAroundCopies = async (obj) => {
   }
 }
 
-/**
- * Synchronise toutes les copies avec leur original
- * Appelé quand l'original est modifié (position, taille, etc.)
- * 
- * @param {fabric.Object} original - L'objet original
- */
 const syncAllCopiesWithOriginal = (original) => {
   if (!original || !canvas) return
   
@@ -942,14 +689,6 @@ const syncAllCopiesWithOriginal = (original) => {
   })
 }
 
-/**
- * Applique l'effet wrap around à un objet
- * 
- * Quand l'objet dépasse un bord, des copies visuelles apparaissent de l'autre côté
- * pour montrer la partie qui dépasse. L'objet original reste à sa position.
- * 
- * @param {fabric.Object} obj - L'objet Fabric.js à ajuster
- */
 const applyWrapAround = async (obj) => {
   if (!obj || !canvas || obj.userData?.isWorkZoneIndicator || obj.userData?.isWrapAroundCopy) return
   
@@ -1533,11 +1272,6 @@ const initCanvas = () => {
       const x = pointer.x
       const y = pointer.y
       
-      // Mettre à jour les coordonnées du curseur
-      cursorCoords2D.value = {
-        x: x,
-        y: y
-      }
       
       // Chercher l'objet actif (sélectionné)
       const activeObject = canvas.getActiveObject()
@@ -1563,42 +1297,14 @@ const initCanvas = () => {
             distance = Math.sqrt(Math.pow(x - controlX, 2) + Math.pow(y - controlY, 2))
           }
           
-          // Mettre à jour l'état de débogage
-          detectedControl2D.value = {
-            show: true,
-            handle: handleInfo.handle || null,
-            corner: handleInfo.corner || null,
-            edge: handleInfo.edge || null,
-            isRotation: handleInfo.isRotation || false,
-            distance: distance,
-            x: controlX,
-            y: controlY
-          }
+          
         } else {
           // Aucun contrôle détecté
-          detectedControl2D.value = {
-            show: false,
-            handle: null,
-            corner: null,
-            edge: null,
-            isRotation: false,
-            distance: null,
-            x: null,
-            y: null
-          }
+         
         }
       } else {
         // Aucun objet sélectionné
-        detectedControl2D.value = {
-          show: false,
-          handle: null,
-          corner: null,
-          edge: null,
-          isRotation: false,
-          distance: null,
-          x: null,
-          y: null
-        }
+      
       }
     })
     canvas.on('selection:created', () => {
@@ -1810,9 +1516,6 @@ const redo = () => {
 }
 
 // Fonction pour supprimer l'élément sélectionné
-/**
- * Désélectionne l'objet actuellement sélectionné sur le canvas
- */
 const deselectObject = () => {
   if (!canvas) return
   
@@ -1940,301 +1643,13 @@ const updateBrush = () => {
   }
 }
 
-const updateBrushAndSelection = () => {
-  updateBrush()
-  
-  // Si un objet est sélectionné, appliquer la couleur immédiatement
-  if (canvas) {
-    const activeObject = canvas.getActiveObject()
-    if (activeObject) {
-      applyColorToSelection()
-    }
-  }
-}
 
-const applyColorToSelection = () => {
-  if (!canvas) return
-  
-  const activeObject = canvas.getActiveObject()
-  
-  if (!activeObject) {
-    alert('Veuillez d\'abord sélectionner un objet (cliquez dessus)')
-    return
-  }
-  
-  // Appliquer la couleur selon le type d'objet
-  if (activeObject.type === 'textbox' || activeObject.type === 'text' || activeObject.type === 'i-text') {
-    activeObject.set('fill', drawColor.value)
-  } else if (activeObject.type === 'circle' || activeObject.type === 'rect' || activeObject.type === 'ellipse') {
-    activeObject.set('fill', drawColor.value)
-  } else if (activeObject.type === 'image') {
-    // Pour les images, on peut appliquer une couleur de filtre ou de bordure
-    activeObject.set('stroke', drawColor.value)
-    activeObject.set('strokeWidth', 3)
-  } else {
-    // Pour les autres types, essayer fill
-    activeObject.set('fill', drawColor.value)
-  }
-  
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  
-}
-
-const applyRotation = () => {
-  if (!canvas) return
-  
-  const activeObject = canvas.getActiveObject()
-  
-  if (!activeObject) {
-    alert('Veuillez d\'abord sélectionner un objet (cliquez dessus)')
-    return
-  }
-  
-  // Normaliser l'angle entre -360 et 360
-  let angle = rotationAngle.value
-  if (angle < -360) angle = -360
-  if (angle > 360) angle = 360
-  
-  // Obtenir le centre actuel de l'objet avant la rotation
-  // getCenterPoint() retourne le centre géométrique réel de l'objet
-  activeObject.setCoords() // S'assurer que les coordonnées sont à jour
-  const centerBefore = activeObject.getCenterPoint()
-  const centerX = centerBefore.x
-  const centerY = centerBefore.y
-  
-  // Appliquer la rotation à l'objet
-  activeObject.set({ angle: angle })
-  activeObject.setCoords()
-  
-  // Obtenir le nouveau centre après rotation
-  const centerAfter = activeObject.getCenterPoint()
-  
-  // Calculer le décalage nécessaire pour ramener le centre à sa position d'origine
-  const deltaX = centerX - centerAfter.x
-  const deltaY = centerY - centerAfter.y
-  
-  // Ajuster la position pour maintenir le même centre
-  activeObject.set({
-    left: (activeObject.left || 0) + deltaX,
-    top: (activeObject.top || 0) + deltaY
-  })
-  activeObject.setCoords()
-  
-  // Synchroniser les copies wrap-around si l'objet roté est un original
-  if (!activeObject.userData?.isWorkZoneIndicator && !activeObject.userData?.isWrapAroundCopy) {
-    syncAllCopiesWithOriginal(activeObject)
-  } else if (activeObject.userData?.isWrapAroundCopy) {
-    // Si c'est une copie qui est rotée, synchroniser avec l'original
-    const original = activeObject.userData?.originalObject
-    if (original) {
-      original.set({ angle: angle })
-      original.setCoords()
-      syncAllCopiesWithOriginal(original)
-    }
-  }
-  
-
-  
-  // Émettre l'événement de rotation pour appliquer la rotation au modèle 3D
-  if (!activeObject.userData?.isWorkZoneIndicator) {
-    emit('object-rotated', {
-      object: activeObject,
-      angle: angle // Angle en degrés
-    })
-  }
-  
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  saveHistory()
-  signalChange()
-}
-
-const toggleDrawMode = () => {
-  if (!canvas) return
-  isDrawMode.value = !isDrawMode.value
-  canvas.isDrawingMode = isDrawMode.value
-  
-  if (isDrawMode.value) {
-    // Mode dessin : désactiver la sélection temporairement
-    canvas.selection = false
-    canvas.defaultCursor = 'crosshair'
-    // Désactiver les événements sur les objets pendant le dessin
-    canvas.getObjects().forEach(obj => {
-      obj.evented = false
-    })
-  } else {
-    // Mode objet : activer la sélection et le déplacement
-    canvas.selection = true
-    canvas.defaultCursor = 'default'
-    // Réactiver les événements sur tous les objets
-    canvas.getObjects().forEach(obj => {
-      obj.selectable = true
-      obj.evented = true
-    })
-    canvas.renderAll()
-  }
-}
-
-
-
-
-
-
-/**
- * Ajoute une ligne rouge verticale pour visualiser la couture du gobelet
- * La couture est à x = 0 (et x = canvasWidth car c'est le même point sur un modèle cylindrique)
- */
-const addSeamLine = () => {
-  if (!canvas) {
-    return
-  }
-  
-  // Vérifier si une ligne de couture existe déjà
-  const existingSeam = canvas.getObjects().find(obj => obj.userData?.isSeamLine)
-  if (existingSeam) {
-    // Si elle existe, la supprimer
-    canvas.remove(existingSeam)
-    canvas.renderAll()
-    requestTextureUpdate()
-    emit('design-updated', canvas)
-    return
-  }
-  
-  // Créer une ligne rouge verticale à x = 0 (couture)
-  // La ligne va de haut en bas du canvas
-  const seamLine = new Rect({
-    left: 0,
-    top: 0,
-    width: 2, // Largeur de 2px pour être visible
-    height: canvasHeight,
-    fill: '#ff0000', // Rouge pur
-    stroke: '#cc0000', // Bordure rouge foncé
-    strokeWidth: 0,
-    rx: 0,
-    ry: 0,
-    selectable: false, // Non sélectionnable pour éviter de la déplacer
-    evented: false, // Ne bloque pas les interactions
-    excludeFromExport: false // Inclure dans l'export
-  })
-  
-  seamLine.userData = { isSeamLine: true }
-  
-  canvas.add(seamLine)
-  // Envoyer la ligne à l'arrière-plan pour ne pas gêner
-  try {
-    if (canvas.sendObjectToBack) {
-      canvas.sendObjectToBack(seamLine)
-    }
-  } catch (e) {
-    // Si la méthode n'existe pas, ignorer
-  }
-  
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-  
-}
 
 // Fonction addSeamPoint supprimée - fonctionnalité de point vert sur la couture désactivée
 
-/**
- * Ajoute une bande verte horizontale au centre du gobelet
- * Cette bande apparaîtra comme une bande horizontale sur le modèle 3D
- */
-const addGreenBand = () => {
-  if (!canvas) {
-    return
-  }
-  
-  // Calculer la position au centre vertical du canvas (zone active)
-  const topHeight = canvasHeight * props.workZoneTop
-  const bottomHeight = canvasHeight * props.workZoneBottom
-  const activeZoneTop = topHeight
-  const activeZoneBottom = canvasHeight - bottomHeight
-  const activeZoneCenterY = activeZoneTop + (activeZoneBottom - activeZoneTop) / 2
-  
-  // Créer une bande verte horizontale
-  // IMPORTANT: Éviter la zone de couture (bords gauche et droit)
-  // La couture est à x = 0 et x = canvasWidth (même point dans la projection cylindrique)
-  // On crée deux bandes séparées pour éviter que la bande soit traversée par la couture
-  
-  const bandHeight = 20
-  const seamAvoidanceZone = 50 // Zone à éviter autour de la couture (50px de chaque côté)
-  const bandWidth = (canvasWidth - seamAvoidanceZone * 2) / 2 // Largeur de chaque bande
-  
-  // Bande gauche (de la zone d'évitement jusqu'au centre)
-  const leftBand = new Rect({
-    left: seamAvoidanceZone, // Commencer après la zone de couture
-    top: activeZoneCenterY - bandHeight / 2,
-    width: bandWidth,
-    height: bandHeight,
-    fill: '#00ff00', // Vert pur
-    stroke: '#00cc00', // Bordure vert foncé
-    strokeWidth: 1,
-    rx: 0,
-    ry: 0,
-    selectable: true,
-    evented: true
-  })
-  
-  // Bande droite (du centre jusqu'à la zone d'évitement)
-  const rightBand = new Rect({
-    left: canvasWidth / 2, // Commencer au centre
-    top: activeZoneCenterY - bandHeight / 2,
-    width: bandWidth,
-    height: bandHeight,
-    fill: '#00ff00', // Vert pur
-    stroke: '#00cc00', // Bordure vert foncé
-    strokeWidth: 1,
-    rx: 0,
-    ry: 0,
-    selectable: true,
-    evented: true
-  })
-  
-  canvas.add(leftBand)
-  canvas.add(rightBand)
-  canvas.setActiveObject(leftBand) // Sélectionner la première bande
-  
-  canvas.isDrawingMode = false
-  isDrawMode.value = false
-  canvas.selection = true
-  canvas.renderAll()
-  requestTextureUpdate()
-  emit('design-updated', canvas)
-}
 
-const clearCanvas = () => {
-  if (!canvas) return
-  canvas.clear()
-  canvas.backgroundColor = 'transparent'
-  canvas.renderAll()
-  requestTextureUpdate() // Signal pour mettre à jour la texture 3D
-  emit('design-updated', canvas)
-  
-  // Réinitialiser l'historique après avoir effacé
-  history = []
-  historyIndex = -1
-  saveHistory()
-}
 
-const exportDesign = () => {
-  if (!canvas) return
-  const dataURL = canvas.toDataURL({
-    format: 'png',
-    quality: 1
-  })
-  
-  const link = document.createElement('a')
-  link.href = dataURL
-  link.download = 'design.png'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-}
+
 
 // Methods to get canvas data for texture
 const getCanvasAsTexture = () => {
@@ -2279,10 +1694,6 @@ const getCanvasAsTexture = () => {
   return null
 }
 
-/**
- * Active le mode de placement pour un type d'élément
- * Ajoute directement l'élément au centre du canvas
- */
 const activatePlacementMode = (type) => {
   if (!canvas) {
     return
@@ -2300,9 +1711,6 @@ const activatePlacementMode = (type) => {
   placeElementAt(type, centerX, activeZoneCenterY)
 }
 
-/**
- * Place un élément à une position spécifique sur le canvas
- */
 const placeElementAt = (type, x, y) => {
   if (!canvas) {
     return
@@ -2358,12 +1766,6 @@ const placeCircleAt = (x, y) => {
   requestTextureUpdate()
   emit('design-updated', canvas)
 }
-/**
- * Crée un rectangle centré à la position (x, y) et configure ses contrôles
- * 
- * @param {number} x - Position X où placer le rectangle (centre)
- * @param {number} y - Position Y où placer le rectangle (centre)
- */
 const placeRectangleAt = (x, y) => {
   // ===== ÉTAPE 1: Définir les dimensions =====
   const rectWidth = 100      // Largeur du rectangle
@@ -2449,49 +1851,8 @@ const placeTextAt = (x, y) => {
   emit('design-updated', canvas)
 }
 
-const placeImageAt = async (x, y) => {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'image/*'
-  input.onchange = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
 
-    try {
-      const url = URL.createObjectURL(file)
-      const fabricImg = await FabricImage.fromURL(url)
-      
-      fabricImg.set({
-        left: x - fabricImg.width / 2,
-        top: y - fabricImg.height / 2,
-        selectable: true,
-        evented: true
-      })
-      
-      canvas.add(fabricImg)
-      canvas.setActiveObject(fabricImg)
-      canvas.isDrawingMode = false
-      isDrawMode.value = false
-      canvas.selection = true
-      canvas.renderAll()
-      requestTextureUpdate()
-      emit('design-updated', canvas)
-      
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      alert('Erreur lors du chargement de l\'image')
-    }
-  }
-  input.click()
-}
 
-/**
- * Trouve l'objet Fabric.js à une position donnée sur le canvas
- * 
- * @param {number} x - Position X sur le canvas
- * @param {number} y - Position Y sur le canvas
- * @returns {fabric.Object|null} - L'objet trouvé ou null
- */
 const findObjectAtPosition = (x, y) => {
   if (!canvas) return null
   
@@ -2602,15 +1963,6 @@ const findObjectAtPosition = (x, y) => {
   return null
 }
 
-/**
- * Détecte si un point est près d'un bord ou coin d'un objet pour le redimensionnement
- * 
- * @param {fabric.Object} obj - L'objet à vérifier
- * @param {number} x - Position X du point
- * @param {number} y - Position Y du point
- * @param {number} threshold - Distance de tolérance en pixels (défaut: 10)
- * @returns {Object|null} - { edge: 'top'|'bottom'|'left'|'right'|'corner', corner: 'tl'|'tr'|'bl'|'br'|null } ou null
- */
 const detectResizeHandle = (obj, x, y, threshold = 10) => {
   if (!obj) return null
   
@@ -2783,249 +2135,101 @@ const detectResizeHandle = (obj, x, y, threshold = 10) => {
   return null
 }
 
-/**
- * Calcule la distance d'un point à un segment de ligne
- * @param {number} px - Coordonnée X du point
- * @param {number} py - Coordonnée Y du point
- * @param {number} x1 - Coordonnée X du premier point du segment
- * @param {number} y1 - Coordonnée Y du premier point du segment
- * @param {number} x2 - Coordonnée X du second point du segment
- * @param {number} y2 - Coordonnée Y du second point du segment
- * @returns {number} - Distance minimale du point au segment
- */
 const distanceToLineSegment = (px, py, x1, y1, x2, y2) => {
   const dx = x2 - x1
   const dy = y2 - y1
   const length2 = dx * dx + dy * dy
-  
   if (length2 === 0) {
-    // Les deux points sont confondus
     return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
   }
-  
-  // Paramètre t pour le point le plus proche sur le segment
   const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / length2))
-  
-  // Point le plus proche sur le segment
   const closestX = x1 + t * dx
   const closestY = y1 + t * dy
-  
-  // Distance du point au point le plus proche
   return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
 }
 
-/**
- * Calcule les coordonnées de tous les contrôles pour un objet Fabric.js
- * 
- * EXPLICATION : Comment les coordonnées des contrôles changent lors de la rotation
- * ================================================================================
- * 
- * 1. RECALCUL DES COORDONNÉES DE BASE (coords)
- *    ------------------------------------------
- *    Quand un objet est roté, Fabric.js stocke l'angle dans obj.angle.
- *    Les coordonnées des coins (tl, tr, bl, br) sont recalculées automatiquement
- *    par Fabric.js via setCoords() ou calcCoords() en appliquant une transformation
- *    de rotation autour du centre de l'objet.
- * 
- *    Exemple : Un rectangle à 0° avec tl(100, 100), tr(200, 100)
- *              Après rotation de 45° : les coordonnées changent selon :
- *              x' = centerX + (x - centerX) * cos(angle) - (y - centerY) * sin(angle)
- *              y' = centerY + (x - centerX) * sin(angle) + (y - centerY) * cos(angle)
- * 
- * 2. POSITIONNEMENT DES CONTRÔLES
- *    -----------------------------
- *    Les contrôles utilisent les coordonnées transformées (coords) qui sont
- *    déjà calculées par Fabric.js après rotation :
- * 
- *    a) COINS (tl, tr, bl, br) :
- *       → Utilisent directement les coordonnées transformées
- *       → Exemple : controls.tl = { x: coords.tl.x, y: coords.tl.y }
- *       → Ces coordonnées changent automatiquement car coords.tl est déjà roté
- * 
- *    b) BORDS (mt, mb, ml, mr) :
- *       → Calculés comme la moyenne des deux coins adjacents
- *       → Exemple : mt = milieu entre tl et tr
- *       → mt.x = (coords.tl.x + coords.tr.x) / 2
- *       → mt.y = (coords.tl.y + coords.tr.y) / 2
- *       → Comme tl et tr sont déjà rotés, mt suit automatiquement la rotation
- * 
- *    c) CONTRÔLE DE ROTATION (mtr) :
- *       → Positionné perpendiculairement au bord supérieur
- *       → Utilise un calcul vectoriel pour trouver la direction perpendiculaire :
- *         - Vecteur du bord : dx = tr.x - tl.x, dy = tr.y - tl.y
- *         - Vecteur perpendiculaire vers le haut : (dy, -dx) normalisé
- *         - Position = centre du bord + offset * vecteur perpendiculaire
- *       → Formule : 
- *         x = centerTopX + (dy / length) * offset
- *         y = centerTopY - (dx / length) * offset
- *       → Ce calcul garantit que mtr reste toujours au-dessus du bord (côté opposé à bl),
- *         même après rotation
- * 
- * 3. POURQUOI ÇA FONCTIONNE
- *    -----------------------
- *    Fabric.js gère automatiquement la transformation des coordonnées lors de la rotation.
- *    Quand on appelle setCoords() ou calcCoords(), Fabric.js :
- *    - Prend les coordonnées locales de l'objet (non roté)
- *    - Applique la transformation de rotation
- *    - Retourne les coordonnées dans l'espace du canvas (déjà rotées)
- * 
- *    Donc, on n'a pas besoin de calculer manuellement la rotation des contrôles :
- *    on utilise simplement les coordonnées transformées que Fabric.js nous donne !
- * 
- * @param {fabric.Object} obj - L'objet Fabric.js
- * @returns {Object} - Objet contenant les coordonnées de tous les contrôles
- */
 const calculateControlCoordinates2D = (obj) => {
   if (!obj) return {}
-  
-  // ÉTAPE 1 : Recalculer les coordonnées transformées de l'objet
-  // Fabric.js calcule automatiquement les nouvelles positions des coins
-  // après rotation en utilisant la matrice de transformation
   let coords = null
   try {
-    if (obj.setCoords) {
-      obj.setCoords() // Force le recalcul des coordonnées transformées
-    }
+    if (obj.setCoords) obj.setCoords()
     coords = obj.calcCoords ? obj.calcCoords() : obj.oCoords
-    // coords contient maintenant tl, tr, bl, br avec leurs nouvelles positions rotées
   } catch (e) {
-    console.warn('Erreur lors de calcCoords:', e)
     coords = obj.oCoords || null
   }
-  
   if (!coords || !coords.tl) return {}
-  
   const controls = {}
-  
-  // ÉTAPE 2a : COINS - Utiliser directement les coordonnées transformées
-  // Ces coordonnées sont déjà rotées par Fabric.js, donc on les copie telles quelles
-  if (coords.tl) {
-    controls.tl = { x: coords.tl.x, y: coords.tl.y } // Top-left (déjà roté)
-  }
-  if (coords.tr) {
-    controls.tr = { x: coords.tr.x, y: coords.tr.y } // Top-right (déjà roté)
-  }
-  if (coords.bl) {
-    controls.bl = { x: coords.bl.x, y: coords.bl.y } // Bottom-left (déjà roté)
-  }
-  if (coords.br) {
-    controls.br = { x: coords.br.x, y: coords.br.y } // Bottom-right (déjà roté)
-  }
-  
-  // ÉTAPE 2b : BORDS - Moyenne des deux coins adjacents (déjà rotés)
-  // Comme les coins sont rotés, la moyenne donne automatiquement le bon milieu roté
+  if (coords.tl) controls.tl = { x: coords.tl.x, y: coords.tl.y }
+  if (coords.tr) controls.tr = { x: coords.tr.x, y: coords.tr.y }
+  if (coords.bl) controls.bl = { x: coords.bl.x, y: coords.bl.y }
+  if (coords.br) controls.br = { x: coords.br.x, y: coords.br.y }
   if (coords.tl && coords.tr) {
     controls.mt = { 
-      x: (coords.tl.x + coords.tr.x) / 2, // Milieu horizontal du bord supérieur
-      y: (coords.tl.y + coords.tr.y) / 2  // (déjà roté car tl et tr le sont)
+      x: (coords.tl.x + coords.tr.x) / 2,
+      y: (coords.tl.y + coords.tr.y) / 2
     }
   }
   if (coords.bl && coords.br) {
     controls.mb = { 
-      x: (coords.bl.x + coords.br.x) / 2, // Milieu du bord inférieur
-      y: (coords.bl.y + coords.br.y) / 2  // (déjà roté)
+      x: (coords.bl.x + coords.br.x) / 2,
+      y: (coords.bl.y + coords.br.y) / 2
     }
   }
   if (coords.tl && coords.bl) {
     controls.ml = { 
-      x: (coords.tl.x + coords.bl.x) / 2, // Milieu du bord gauche
-      y: (coords.tl.y + coords.bl.y) / 2  // (déjà roté)
+      x: (coords.tl.x + coords.bl.x) / 2,
+      y: (coords.tl.y + coords.bl.y) / 2
     }
   }
   if (coords.tr && coords.br) {
     controls.mr = { 
-      x: (coords.tr.x + coords.br.x) / 2, // Milieu du bord droit
-      y: (coords.tr.y + coords.br.y) / 2  // (déjà roté)
+      x: (coords.tr.x + coords.br.x) / 2,
+      y: (coords.tr.y + coords.br.y) / 2
     }
   }
-  
-  // ÉTAPE 2c : CONTRÔLE DE ROTATION (mtr) - Calcul vectoriel perpendiculaire
-  // Ce contrôle doit rester au-dessus du bord supérieur, même après rotation
   if (coords.tl && coords.tr) {
-    // Centre du bord supérieur (déjà roté)
     const centerTopX = (coords.tl.x + coords.tr.x) / 2
     const centerTopY = (coords.tl.y + coords.tr.y) / 2
-    
-    // Vecteur du bord supérieur (de tl vers tr)
-    // Ce vecteur indique la direction du bord après rotation
     const dx = coords.tr.x - coords.tl.x
     const dy = coords.tr.y - coords.tl.y
     const length = Math.sqrt(dx * dx + dy * dy)
-    
-    // Cas spécial : objet non roté (bord horizontal)
     if (Math.abs(dy) < 0.01) {
-      // Rectangle non roté : positionner directement au-dessus (Y diminue vers le haut)
       controls.mtr = { 
         x: centerTopX, 
         y: centerTopY - 30 
       }
     } else {
-      // Rectangle roté : utiliser le calcul vectoriel
-      // Le vecteur perpendiculaire à (dx, dy) peut être (-dy, dx) ou (dy, -dx)
-      // On choisit (dy, -dx) pour pointer vers le haut (au-dessus du bord)
-      // Cela garantit que mtr est toujours du côté opposé à bl (en haut)
-      const offset = 30 // Distance au-dessus du bord
+      const offset = 30
       controls.mtr = { 
-        // Formule : position = centre + offset * vecteur_perpendiculaire_normalisé_vers_le_haut
-        x: centerTopX + (dy / length) * offset, // Composante X du vecteur perpendiculaire (inversée)
-        y: centerTopY - (dx / length) * offset   // Composante Y du vecteur perpendiculaire (inversée)
+        x: centerTopX + (dy / length) * offset,
+        y: centerTopY - (dx / length) * offset
       }
     }
   }
-  
   return controls
 }
 
-/**
- * Met à jour la liste de tous les objets du canvas avec leurs contrôles
- */
-
-
-/**
- * Sélectionne un objet à une position donnée sur le canvas
- * 
- * @param {number} x - Position X sur le canvas
- * @param {number} y - Position Y sur le canvas
- * @returns {boolean} - true si un objet a été sélectionné
- */
 const selectObjectAtPosition = (x, y) => {
-  if (!canvas) {
-    return false
-  }
-  
-  
+  if (!canvas) return false
   const obj = findObjectAtPosition(x, y)
-  
   if (obj) {
-    // Permettre la sélection directe des copies pour voir leurs contrôles
-    // Sélectionner l'objet cliqué directement (copie ou original)
     const targetObject = obj
     
     canvas.setActiveObject(targetObject)
-    updateHasSelection() // Mettre à jour hasSelection
-    // Activer les contrôles pour l'objet sélectionné
+    updateHasSelection()
     activateControlsForObject(targetObject)
     canvas.renderAll()
-    
-    // Émettre l'événement de sélection
     emit('object-selected', {
       object: targetObject,
       type: targetObject.type
     })
-    
     return true
   }
-  
-  // Si aucun objet n'a été trouvé exactement, chercher l'objet le plus proche
-  
   const objects = canvas.getObjects().filter(obj => 
     !obj.userData?.isWorkZoneIndicator && 
     obj.visible !== false &&
     (obj.selectable !== false || obj.evented !== false)
   )
-  
-  // Si il n'y a qu'un seul objet, vérifier s'il est proche du point de clic
-  // Si oui, le sélectionner, sinon désélectionner
   if (objects.length === 1) {
     const obj = objects[0]
     const objLeft = obj.left || 0
@@ -3050,25 +2254,18 @@ const selectObjectAtPosition = (x, y) => {
       actualTop = objTop - objHeight
     }
     
-    // Vérifier si le clic est proche de l'objet (tolérance de 100px)
     const tolerance = 100
     const isNear = x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
                    y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
-    
     if (isNear) {
-      // Permettre la sélection directe des copies
       const targetObject = obj
-      
       canvas.setActiveObject(targetObject)
-      // Activer les contrôles pour l'objet sélectionné
       activateControlsForObject(targetObject)
       canvas.renderAll()
-      
       emit('object-selected', {
         object: targetObject,
         type: targetObject.type
       })
-      
       return true
     } else {
       canvas.discardActiveObject()
@@ -3077,12 +2274,8 @@ const selectObjectAtPosition = (x, y) => {
       return false
     }
   }
-  
-  // Chercher l'objet le plus proche du point de clic
-  // Si aucun objet n'est trouvé exactement, prendre le plus proche même s'il est loin
   let closestObj = null
   let closestDistance = Infinity
-  
   objects.forEach(obj => {
     const objLeft = obj.left || 0
     const objTop = obj.top || 0
@@ -3106,29 +2299,19 @@ const selectObjectAtPosition = (x, y) => {
       actualTop = objTop - objHeight
     }
     
-    // Calculer le centre de l'objet
     const centerX = actualLeft + objWidth / 2
     const centerY = actualTop + objHeight / 2
-    
-    // Calculer la distance du point de clic au centre de l'objet
     const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
-    
-    // Vérifier si le point est dans les limites de l'objet (avec tolérance très large)
-    const tolerance = 200 // Tolérance très large (200px) pour capturer même les objets éloignés
+    const tolerance = 200
     const isInBounds = x >= actualLeft - tolerance && x <= actualLeft + objWidth + tolerance &&
                        y >= actualTop - tolerance && y <= actualTop + objHeight + tolerance
-    
-    // Si l'objet est dans les bounds OU si c'est le plus proche jusqu'à présent
     if ((isInBounds || objects.length === 1) && distance < closestDistance) {
       closestDistance = distance
       closestObj = obj
     }
   })
-  
-  // Si on n'a toujours pas trouvé d'objet mais qu'il y a des objets, prendre le plus proche
-  // MAIS seulement s'il est dans une zone raisonnable (max 300px)
   if (!closestObj && objects.length > 0) {
-    const maxDistance = 300 // Distance maximale pour sélectionner un objet
+    const maxDistance = 300
     objects.forEach(obj => {
       const objLeft = obj.left || 0
       const objTop = obj.top || 0
@@ -3155,39 +2338,28 @@ const selectObjectAtPosition = (x, y) => {
       const centerX = actualLeft + objWidth / 2
       const centerY = actualTop + objHeight / 2
       const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2))
-      
-      // Ne sélectionner que si l'objet est dans une distance raisonnable
       if (distance < closestDistance && distance < maxDistance) {
         closestDistance = distance
         closestObj = obj
       }
     })
   }
-  
-  // Si on a trouvé un objet proche, le sélectionner
   if (closestObj) {
-    // Permettre la sélection directe des copies
     const targetObject = closestObj
-    
     canvas.setActiveObject(targetObject)
-    updateHasSelection() // Mettre à jour hasSelection
-    // Activer les contrôles pour l'objet sélectionné
+    updateHasSelection()
     activateControlsForObject(targetObject)
     canvas.renderAll()
-    
     emit('object-selected', {
       object: targetObject,
       type: targetObject.type
     })
-    
     return true
   }
-  
   canvas.discardActiveObject()
-  updateHasSelection() // Mettre à jour hasSelection
+  updateHasSelection()
   canvas.renderAll()
   emit('object-deselected')
-  
   return false
 }
 
@@ -3202,7 +2374,6 @@ const selectObjectAtPosition = (x, y) => {
  */
 const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) => {
   if (!canvas) return
-  console.log('resizeSelectedObjectFromHandle')
   const activeObject = canvas.getActiveObject()
   if (!activeObject || activeObject.userData?.isWorkZoneIndicator) {
     return
@@ -3290,8 +2461,6 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
       // Garder la position et le scale X inchangés
     } else if (handleInfo.edge === 'top') {
       newScaleY = (initialHeight - localDeltaY) / originalHeight
-    console.log('newScaleY', newScaleY, 'newTop', newTop,'initialHeight', initialHeight,'localDeltaY', localDeltaY,'originalHeight', originalHeight,'initialScale.top', initialScale.top,'deltaY', deltaY)
-      // Transformer le déplacement dans le système global pour la position
       newTop = (initialScale.top + deltaY)
     }
   }
@@ -3300,46 +2469,23 @@ const resizeSelectedObjectFromHandle = async (x, y, startX, startY, handleInfo) 
   newScaleX = Math.max(0.1, Math.min(10, newScaleX))
   newScaleY = Math.max(0.1, Math.min(10, newScaleY))
   
-  // ========================================================================
-  // MAINTENIR LE CENTRE FIXE PENDANT LE RESIZE
-  // ========================================================================
-  
-  // Obtenir le vrai centre de l'objet (tient compte de originX/originY)
   const centerPoint = activeObject.getCenterPoint()
   const oldCenterX = centerPoint.x
   const oldCenterY = centerPoint.y
   
-  console.log('🎯 Maintien du centre fixe:')
-  console.log('  Centre actuel (getCenterPoint):', oldCenterX, oldCenterY)
-  console.log('  Origin:', activeObject.originX, activeObject.originY)
-  console.log('  Ancien scale:', initialScale.scaleX, initialScale.scaleY)
-  console.log('  Nouveau scale:', newScaleX, newScaleY)
-  console.log('  Ancienne position:', initialScale.left, initialScale.top)
-  
-  // Appliquer les transformations
   activeObject.set({
     scaleX: newScaleX,
     scaleY: newScaleY
   })
   
-  // Recalculer left/top pour que le centre reste au même endroit
-  // Fabric.js utilise getCenterPoint() qui tient compte de originX/originY
   const newCenterPoint = activeObject.getCenterPoint()
-  
-  // Calculer le décalage du centre
   const centerDeltaX = newCenterPoint.x - oldCenterX
   const centerDeltaY = newCenterPoint.y - oldCenterY
   
-  // Ajuster left/top pour compenser le décalage
   activeObject.set({
     left: activeObject.left - centerDeltaX,
     top: activeObject.top - centerDeltaY
   })
-  
-  const finalCenterPoint = activeObject.getCenterPoint()
-  console.log('  Nouvelle position:', activeObject.left, activeObject.top)
-  console.log('  Nouveau centre (getCenterPoint):', finalCenterPoint.x, finalCenterPoint.y)
-  console.log('  Décalage du centre:', centerDeltaX, centerDeltaY)
   
   // Pour les cercles, ajuster aussi le radius
   if (activeObject.type === 'circle' && activeObject.radius) {
@@ -3667,7 +2813,6 @@ const activateRotationMode = (obj, mtrCoords) => {
 defineExpose({
   getCanvas: () => canvas,
   getCanvasAsTexture,
-  clearCanvas,
   getCanvasElement: () => canvas ? canvas.getElement() : null,
   placeElementAt,
   activatePlacementMode,
@@ -3684,8 +2829,6 @@ defineExpose({
   redo,
   deleteSelected,
   deselectObject,
-  addGreenBand,
-  addSeamLine,
   activateRotationMode
 })
 </script>
@@ -3741,54 +2884,6 @@ defineExpose({
   background: #4338ca;
 }
 
-.toolbar-separator {
-  width: 1px;
-  height: 30px;
-  background: #ccc;
-  margin: 0 4px;
-}
-
-.toolbar-btn input[type="color"] {
-  width: 30px;
-  height: 25px;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.toolbar-btn input[type="range"] {
-  width: 80px;
-}
-
-.toolbar-btn input[type="number"],
-.toolbar-btn .rotation-input {
-  width: 70px;
-  padding: 4px 6px;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  font-size: 14px;
-  text-align: center;
-}
-
-.export-btn {
-  background: #4f46e5;
-  color: white;
-  border-color: #4338ca;
-}
-
-.export-btn:hover {
-  background: #4338ca;
-}
-
-.fabric-canvas {
-  border: 1px solid #ddd;
-  cursor: default;
-  display: block;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  margin: 20px auto;
-}
-
 .fabric-designer-container {
   width: 100%;
   height: 100%;
@@ -3822,103 +2917,6 @@ defineExpose({
   visibility: visible !important;
   opacity: 1 !important;
   flex-shrink: 0;
-}
-
-/* Style pour la div de débogage des contrôles 2D */
-.debug-control-2d {
-  position: absolute;
-  height: 200px;
-  top: 150px;
-  right: 20px;
-  background: rgba(34, 197, 94, 0.9);
-  border: 2px solid #22c55e;
-  color: #fff;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  z-index: 1000;
-  min-width: 200px;
-  max-width: 250px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-}
-
-.debug-control-2d .coord-title {
-  color: #fff;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.debug-control-2d .coord-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.debug-control-2d .coord-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-}
-
-.debug-control-2d .coord-label {
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.debug-control-2d .coord-value {
-  font-weight: 500;
-  color: #fff;
-}
-
-/* Style pour la div des coordonnées du curseur 2D */
-.cursor-coords-2d {
-  position: absolute;
-  top: 100px;
-  right: 20px;
-  background: rgba(59, 130, 246, 0.9);
-  border: 2px solid #3b82f6;
-  color: #fff;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  z-index: 1000;
-  min-width: 150px;
-  max-width: 200px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-}
-
-.cursor-coords-2d .coord-title {
-  color: #fff;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.cursor-coords-2d .coord-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.cursor-coords-2d .coord-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-}
-
-.cursor-coords-2d .coord-label {
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.cursor-coords-2d .coord-value {
-  font-weight: 500;
-  color: #fff;
 }
 
 

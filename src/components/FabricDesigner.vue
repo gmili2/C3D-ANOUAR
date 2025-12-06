@@ -1570,11 +1570,6 @@ const updateBrush = () => {
 
 
 
-// Fonction addSeamPoint supprimée - fonctionnalité de point vert sur la couture désactivée
-
-
-
-
 
 // Methods to get canvas data for texture
 const getCanvasAsTexture = () => {

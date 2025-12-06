@@ -22,9 +22,7 @@ export function useDesignStudio() {
   let lastRotationAngle = 0
   let skipped2DFrames = 0
 
-  // ============================================
-  // HELPER FUNCTIONS
-  // ============================================
+
 
   const setDragModeInThreeScene = (enabled) => {
     threeSceneRef.value?.setDragMode?.(enabled)
@@ -145,17 +143,13 @@ export function useDesignStudio() {
     return 'move'
   }
 
-  // ============================================
-  // EVENT HANDLERS - TEXTURE
-  // ============================================
+
 
   const onTextureReady = (texture) => {
     appliedTexture.value = texture
   }
 
-  // ============================================
-  // EVENT HANDLERS - PLACEMENT & CLICK
-  // ============================================
+
 
   const on3DClickForPlacement = (clickData) => {
     if (clickData.canvasX == null || clickData.canvasY == null) return
@@ -206,9 +200,7 @@ export function useDesignStudio() {
 
   }
 
-  // ============================================
-  // EVENT HANDLERS - ROTATION
-  // ============================================
+
 
   const on3DRotationClick = (clickData) => {
     const activeObject = getActiveObject()
@@ -320,9 +312,7 @@ export function useDesignStudio() {
     }
   }
 
-  // ============================================
-  // EVENT HANDLERS - SELECTION
-  // ============================================
+
 
   const onObjectSelected = (data) => {
     dragMode.value = true
@@ -345,9 +335,7 @@ export function useDesignStudio() {
     }
   }
 
-  // ============================================
-  // EVENT HANDLERS - DRAG
-  // ============================================
+
 
   const on3DDragStart = (clickData) => {
     if (!dragMode.value || clickData.canvasX == null || clickData.canvasY == null) return
@@ -388,9 +376,7 @@ export function useDesignStudio() {
     setCursor(dragMode.value ? 'move' : 'default')
   }
 
-  // ============================================
-  // EVENT HANDLERS - RESIZE
-  // ============================================
+
 
   const onDetectResizeHandle = (data) => {
     const activeObject = getActiveObject()
@@ -441,9 +427,7 @@ export function useDesignStudio() {
     setCursor(dragMode.value ? 'move' : 'default')
   }
 
-  // ============================================
-  // EVENT HANDLERS - HOVER
-  // ============================================
+
 
   const on3DHover = (hoverData) => {
     const activeObject = getActiveObject()
@@ -485,22 +469,9 @@ export function useDesignStudio() {
     }
   }
 
-  // ============================================
-  // EVENT HANDLERS - SCALE
-  // ============================================
 
-//   const on3DScale = (scaleData) => {
-//     if (!dragMode.value) return
-    
-//     const canvas = fabricDesignerRef.value?.getCanvas()
-//     if (!canvas?.getActiveObject()) return
-    
-//     fabricDesignerRef.value?.scaleSelectedObject?.(scaleData.scaleFactor)
-//   }
 
-  // ============================================
-  // UTILITY FUNCTIONS
-  // ============================================
+
 
   const updateAllObjectsList = () => {
     const canvas = fabricDesignerRef.value?.getCanvas()
@@ -518,12 +489,10 @@ export function useDesignStudio() {
     updateAllObjectsList()
   }
 
-  // ============================================
-  // RETURN PUBLIC API
-  // ============================================
+
 
   return {
-    // Refs
+
     threeSceneRef,
     fabricDesignerRef,
     appliedTexture,
@@ -536,7 +505,7 @@ export function useDesignStudio() {
     isResizing,
     isRotating,
 
-    // Event Handlers
+
     onTextureReady,
     on3DClickForPlacement,
     on3DClickOutside,

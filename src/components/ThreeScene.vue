@@ -512,9 +512,7 @@ const onMouseUp = (event: MouseEvent) => {
     rotationJustEnded = true
     rotationEndTime = Date.now()
 
-    // if (renderer?.domElement) {
-    //   renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
-    // }
+
 
     if (controls) {
       controls.enabled = true
@@ -540,9 +538,7 @@ const onMouseUp = (event: MouseEvent) => {
       orbitControlsEnabled.value = true
     }
 
-    // if (renderer?.domElement) {
-    //   renderer.domElement.style.setProperty('cursor', props.dragMode ? 'move' : 'default', 'important')
-    // }
+
 
     if (controls) {
       controls.enabled = true
